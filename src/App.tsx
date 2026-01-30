@@ -1,19 +1,38 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 
+// TV Channels for break room
+const TV_CHANNELS = [
+  { id: 1, name: 'VOID NEWS', videoId: '1ZM6ztUlLWY' },
+  { id: 2, name: 'NATURE ESCAPE', videoId: 'i6Yh6LIEuHQ' },
+  { id: 3, name: 'CHILL BEATS', videoId: 'HEyqytq0-is' },
+  { id: 4, name: 'AMBIENT WORLDS', videoId: 'LTjH5JdxtOA' },
+  { id: 5, name: 'CLASSIC HITS', videoId: 'dQw4w9WgXcQ' }
+];
+
 // 3D Break Room Component - Player can walk around with a TV on the wall
 function BreakRoom3D({ 
   onBreakEnd, 
+  onOpenShop,
   payment, 
   shiftNumber, 
   videoTime, 
-  setVideoTime 
+  setVideoTime,
+  hasRemote,
+  currentChannel,
+  setCurrentChannel,
+  totalMoney
 }: { 
   onBreakEnd: () => void
+  onOpenShop: () => void
   payment: number
   shiftNumber: number
   videoTime: number
   setVideoTime: (t: number) => void
+  hasRemote: boolean
+  currentChannel: number
+  setCurrentChannel: (c: number) => void
+  totalMoney: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -27,36 +46,22 @@ function BreakRoom3D({
   const lockedRef = useRef(false);
   const breakStartTimeRef = useRef<number>(Date.now());
   
-  const [timeLeft, setTimeLeft] = useState(120);
   const [showSkipButton, setShowSkipButton] = useState(false);
   const [tvScreenStyle, setTvScreenStyle] = useState<React.CSSProperties>({});
   const [showTV, setShowTV] = useState(false);
+  const [showRemoteUI, setShowRemoteUI] = useState(false);
+  const [nearRemote, setNearRemote] = useState(false);
+  const remoteMeshRef = useRef<THREE.Mesh | null>(null);
   
-  const formatTime = (s: number) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+  const currentVideoId = TV_CHANNELS[currentChannel - 1]?.videoId || TV_CHANNELS[0].videoId;
   const startSeconds = Math.floor(videoTime);
 
   useEffect(() => {
     breakStartTimeRef.current = Date.now();
     // Reset keys when entering break room
     keysRef.current = {};
-    
-    const timer = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          clearInterval(timer);
-          // Calculate actual time spent in break room and add to video time
-          // Video plays at 2x speed, so multiply by 2
-          const timeSpentSeconds = (Date.now() - breakStartTimeRef.current) / 1000;
-          setVideoTime(videoTime + (timeSpentSeconds * 2));
-          document.exitPointerLock();
-          onBreakEnd();
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [onBreakEnd, videoTime, setVideoTime]);
+    // No timer - player can stay as long as they want
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -251,6 +256,32 @@ function BreakRoom3D({
     magazine.rotation.y = 0.2;
     scene.add(magazine);
 
+    // Remote control on table (only visible if purchased)
+    if (hasRemote) {
+      const remote = new THREE.Mesh(
+        new THREE.BoxGeometry(0.15, 0.03, 0.4),
+        new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 })
+      );
+      remote.position.set(-0.4, 0.5, -0.5);
+      remote.rotation.y = -0.3;
+      scene.add(remote);
+      remoteMeshRef.current = remote;
+
+      // Remote buttons
+      const remoteBtn = new THREE.Mesh(
+        new THREE.CircleGeometry(0.03, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff0000 })
+      );
+      remoteBtn.rotation.x = -Math.PI / 2;
+      remoteBtn.position.set(-0.4, 0.52, -0.55);
+      scene.add(remoteBtn);
+
+      // Remote glow
+      const remoteGlow = new THREE.PointLight(0x00ff00, 2, 2);
+      remoteGlow.position.set(-0.4, 0.6, -0.5);
+      scene.add(remoteGlow);
+    }
+
     // Payment display on wall (positioned clearly ON the wall surface)
     const payCanvas = document.createElement('canvas');
     payCanvas.width = 256;
@@ -285,8 +316,10 @@ function BreakRoom3D({
     payDisplay.position.set(-4, 2.2, -5.63);
     scene.add(payDisplay);
 
-    // Exit door - positioned clearly ON the left wall (wall is at X=-6)
-    // Door frame flush against the wall
+    // Exit door - ON the LEFT WALL, facing into the room
+    // The left wall is at X = -6, so door should be at X = -5.9 (slightly in front)
+    
+    // Door frame on left wall
     const doorFrame = new THREE.Mesh(
       new THREE.BoxGeometry(0.15, 3.2, 1.4),
       new THREE.MeshStandardMaterial({ color: 0x444444 })
@@ -294,12 +327,12 @@ function BreakRoom3D({
     doorFrame.position.set(-5.9, 1.6, 3);
     scene.add(doorFrame);
 
-    // Door itself - mounted on the frame, facing into the room
+    // Door itself - facing into the room (rotated to be on left wall)
     const door = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 2.8, 1.1),
       new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6 })
     );
-    door.position.set(-5.82, 1.4, 3);
+    door.position.set(-5.75, 1.4, 3);
     scene.add(door);
 
     // Door handle on the room-facing side
@@ -307,10 +340,10 @@ function BreakRoom3D({
       new THREE.SphereGeometry(0.06, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xccaa00, metalness: 0.9 })
     );
-    doorHandle.position.set(-5.7, 1.3, 3.35);
+    doorHandle.position.set(-5.6, 1.3, 2.7);
     scene.add(doorHandle);
 
-    // Exit sign above door - on the wall facing into the room
+    // Exit sign above door - on left wall facing into room
     const exitCanvas = document.createElement('canvas');
     exitCanvas.width = 128;
     exitCanvas.height = 48;
@@ -326,16 +359,16 @@ function BreakRoom3D({
       new THREE.PlaneGeometry(0.8, 0.3),
       new THREE.MeshBasicMaterial({ map: exitTexture })
     );
-    exitSign.position.set(-5.75, 3.1, 3);
-    exitSign.rotation.y = Math.PI / 2;
+    exitSign.position.set(-5.7, 3.1, 3);
+    exitSign.rotation.y = Math.PI / 2; // Face into room
     scene.add(exitSign);
     
     // Add a glow to the exit sign
-    const exitGlow = new THREE.PointLight(0x00ff00, 2, 3);
-    exitGlow.position.set(-5.5, 3.1, 3);
+    const exitGlow = new THREE.PointLight(0x00ff00, 3, 4);
+    exitGlow.position.set(-5, 3.1, 3);
     scene.add(exitGlow);
 
-    // Skip break instruction sign - next to the door, facing into room
+    // Skip break instruction sign - on the left wall near door
     const skipCanvas = document.createElement('canvas');
     skipCanvas.width = 200;
     skipCanvas.height = 100;
@@ -357,8 +390,8 @@ function BreakRoom3D({
       new THREE.PlaneGeometry(1, 0.5),
       new THREE.MeshBasicMaterial({ map: skipTexture })
     );
-    skipSign.position.set(-5.75, 1.8, 4.2);
-    skipSign.rotation.y = Math.PI / 2;
+    skipSign.position.set(-5.7, 1.8, 4.2);
+    skipSign.rotation.y = Math.PI / 2; // Face into room
     scene.add(skipSign);
 
     // Wall poster
@@ -417,9 +450,12 @@ function BreakRoom3D({
       animationIdRef.current = requestAnimationFrame(animate);
       clockRef.current?.getDelta();
 
-      if (lockedRef.current && cameraRef.current) {
-        const cam = cameraRef.current;
-        const speed = 0.05;
+      const cam = cameraRef.current;
+      if (!cam) return;
+
+      // ALWAYS update camera movement when pointer is locked
+      if (lockedRef.current) {
+        const speed = 0.06;
         const dir = new THREE.Vector3();
 
         if (keysRef.current['KeyW']) dir.z -= 1;
@@ -439,19 +475,27 @@ function BreakRoom3D({
         cam.position.z = Math.max(-5, Math.min(5, cam.position.z));
         cam.position.y = 1.7;
         cam.rotation.z = 0;
-
-        // Near exit door?
-        if (cam.position.x < -4 && cam.position.z > 2 && cam.position.z < 4.5) {
-          setShowSkipButton(true);
-        } else {
-          setShowSkipButton(false);
-        }
-
-        // TV glow flicker
-        tvGlow.intensity = 8 + Math.sin(Date.now() * 0.008) * 1.5;
       }
 
-      // Update TV screen position for iframe overlay
+      // Near exit door? (check always, not just when locked)
+      if (cam.position.x < -4 && cam.position.z > 2 && cam.position.z < 4.5) {
+        setShowSkipButton(true);
+      } else {
+        setShowSkipButton(false);
+      }
+
+      // Near remote? (table is at z = -0.5)
+      if (hasRemote && cam.position.z > -1.5 && cam.position.z < 0.5 && Math.abs(cam.position.x) < 1.5) {
+        setNearRemote(true);
+      } else {
+        setNearRemote(false);
+        if (!lockedRef.current) setShowRemoteUI(false);
+      }
+
+      // TV glow flicker
+      tvGlow.intensity = 8 + Math.sin(Date.now() * 0.008) * 1.5;
+
+      // Update TV screen position for iframe overlay - ONLY when looking at it
       if (cameraRef.current && tvScreenMeshRef.current && rendererRef.current) {
         const cam = cameraRef.current;
         const tvMesh = tvScreenMeshRef.current;
@@ -525,6 +569,25 @@ function BreakRoom3D({
           onBreakEnd();
         }
       }
+      // Toggle remote UI with E key when near remote
+      if (e.code === 'KeyE' && hasRemote) {
+        const cam = cameraRef.current;
+        if (cam && cam.position.z > -1.5 && cam.position.z < 0.5 && Math.abs(cam.position.x) < 1.5) {
+          setShowRemoteUI(prev => !prev);
+        }
+      }
+      // Channel change with number keys when remote UI is open OR when near TV
+      if (e.key >= '1' && e.key <= '5') {
+        if (hasRemote) {
+          setCurrentChannel(parseInt(e.key));
+          setVideoTime(0); // Reset video time when changing channel
+        }
+      }
+      // Open shop with B key
+      if (e.code === 'KeyB') {
+        document.exitPointerLock();
+        onOpenShop();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -532,19 +595,27 @@ function BreakRoom3D({
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!lockedRef.current || !cameraRef.current) return;
-      const cam = cameraRef.current;
-      cam.rotation.y -= e.movementX * 0.002;
-      cam.rotation.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, cam.rotation.x - e.movementY * 0.002));
+      // Only move camera when pointer is locked
+      if (document.pointerLockElement && cameraRef.current) {
+        const cam = cameraRef.current;
+        cam.rotation.y -= e.movementX * 0.002;
+        cam.rotation.x -= e.movementY * 0.002;
+        cam.rotation.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, cam.rotation.x));
+      }
     };
 
     const handlePointerLockChange = () => {
       lockedRef.current = document.pointerLockElement !== null;
+      // Reset keys when pointer lock changes to prevent stuck movement
+      if (!lockedRef.current) {
+        keysRef.current = {};
+      }
     };
 
     const handleClick = () => {
-      if (!lockedRef.current) {
-        document.body.requestPointerLock();
+      // Request pointer lock on any click when not already locked
+      if (!document.pointerLockElement && rendererRef.current) {
+        rendererRef.current.domElement.requestPointerLock();
       }
     };
 
@@ -559,24 +630,34 @@ function BreakRoom3D({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('click', handleClick);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     window.addEventListener('resize', handleResize);
+    
+    // Add click listener to the renderer element specifically
+    renderer.domElement.addEventListener('click', handleClick);
 
-    setTimeout(() => document.body.requestPointerLock(), 500);
+    // Request pointer lock after a short delay
+    setTimeout(() => {
+      if (renderer.domElement) {
+        renderer.domElement.requestPointerLock();
+      }
+    }, 500);
 
     return () => {
       cancelAnimationFrame(animationIdRef.current);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('click', handleClick);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
       window.removeEventListener('resize', handleResize);
+      if (renderer && renderer.domElement) {
+        renderer.domElement.removeEventListener('click', handleClick);
+      }
       if (containerRef.current && rendererRef.current) {
         containerRef.current.removeChild(rendererRef.current.domElement);
       }
       document.exitPointerLock();
+      keysRef.current = {};
     };
   }, [payment, shiftNumber, onBreakEnd, videoTime, setVideoTime]);
 
@@ -597,12 +678,51 @@ function BreakRoom3D({
           <iframe
             width="100%"
             height="100%"
-            src={`https://www.youtube.com/embed/1ZM6ztUlLWY?autoplay=1&start=${startSeconds}&controls=0&showinfo=0&rel=0&modestbranding=1`}
+            src={`https://www.youtube.com/embed/${currentVideoId}?autoplay=1&start=${startSeconds}&controls=0&showinfo=0&rel=0&modestbranding=1&loop=1&playlist=${currentVideoId}`}
             title="Break Room TV"
             frameBorder="0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope"
             style={{ pointerEvents: 'none' }}
           />
+        </div>
+      )}
+
+      {/* Remote control prompt */}
+      {nearRemote && hasRemote && !showRemoteUI && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-green-500 text-black px-6 py-3 font-bold animate-pulse z-[200]">
+          PRESS [E] TO USE REMOTE
+        </div>
+      )}
+
+      {/* Remote control UI */}
+      {showRemoteUI && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-2 border-green-400 p-6 z-[300] pointer-events-auto" style={{ minWidth: '300px' }}>
+          <h3 className="text-green-400 font-bold text-xl mb-4 text-center">📺 TV REMOTE</h3>
+          <p className="text-gray-400 text-xs mb-4 text-center">Press number keys to change channel</p>
+          <div className="space-y-2">
+            {TV_CHANNELS.map(channel => (
+              <button
+                key={channel.id}
+                onClick={() => {
+                  setCurrentChannel(channel.id);
+                  setVideoTime(0);
+                }}
+                className={`w-full text-left px-4 py-2 font-mono transition-all cursor-pointer ${
+                  currentChannel === channel.id
+                    ? 'bg-green-500 text-black'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                [{channel.id}] {channel.name} {currentChannel === channel.id && '◀'}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setShowRemoteUI(false)}
+            className="w-full mt-4 bg-red-600 text-white px-4 py-2 hover:bg-red-500 cursor-pointer"
+          >
+            CLOSE [E]
+          </button>
         </div>
       )}
 
@@ -613,28 +733,30 @@ function BreakRoom3D({
           <div className="w-4 h-4 border-2 border-white/60 rounded-full" />
         </div>
 
-        {/* Timer */}
+        {/* Break Room Title */}
         <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-black/85 border-2 border-green-400 px-8 py-4 text-green-400 font-mono rounded">
-          <div className="text-xs opacity-70 text-center mb-1 tracking-wider">BREAK TIME REMAINING</div>
-          <div className="text-3xl font-bold text-center tracking-widest">{formatTime(timeLeft)}</div>
+          <div className="text-xs opacity-70 text-center mb-1 tracking-wider">BREAK ROOM</div>
+          <div className="text-xl font-bold text-center tracking-widest">TAKE YOUR TIME</div>
         </div>
 
         {/* Payment HUD */}
         <div className="absolute top-6 right-6 bg-black/85 border-2 border-yellow-400 px-5 py-3 text-yellow-400 font-mono rounded">
           <div className="text-xs opacity-70 tracking-wider">SHIFT {shiftNumber} EARNINGS</div>
           <div className="text-2xl font-bold">${payment.toLocaleString()}</div>
+          <div className="text-xs text-green-400 mt-1">TOTAL: ${totalMoney.toLocaleString()}</div>
+          <div className="text-xs text-cyan-400 mt-1 animate-pulse">[B] OPEN SHOP</div>
         </div>
 
         {/* Controls hint */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/80 border border-gray-600 px-6 py-3 text-gray-400 font-mono text-sm text-center rounded">
-          <p>WASD - Move | Mouse - Look | Click to lock cursor</p>
-          <p className="text-xs opacity-60 mt-1">Walk to the EXIT door and press SPACE to skip break</p>
+          <p>WASD - Move | Mouse - Look | B - Shop | Click to lock cursor</p>
+          <p className="text-xs opacity-60 mt-1">Walk to EXIT door + SPACE to start next shift | [1-5] Change TV (with remote)</p>
         </div>
 
-        {/* Skip button indicator */}
+        {/* Continue to next shift indicator */}
         {showSkipButton && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-orange-500 text-black px-8 py-4 font-mono font-bold text-xl animate-pulse rounded shadow-lg">
-            PRESS [SPACE] TO SKIP BREAK
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-green-500 text-black px-8 py-4 font-mono font-bold text-xl animate-pulse rounded shadow-lg">
+            PRESS [SPACE] TO START NEXT SHIFT
           </div>
         )}
       </div>
@@ -657,14 +779,19 @@ const CONFIG = {
   GUN_STUN_DURATION: 1500,
   GUN_COOLDOWN: 800,
   ESCAPE_TIME_LIMIT: 35,
-  AUTO_APPROVE_TIME: 25,
+  AUTO_APPROVE_TIME: 25, // Base time, can be extended with shop items
   REST_STRESS_REDUCTION: 30,
   SHIFTS: [
-    { quota: 3, stressRate: 1.5, anomalyChance: 0.55, criminalChance: 0.15, basePay: 100, name: "ORIENTATION" },
-    { quota: 5, stressRate: 2.0, anomalyChance: 0.65, criminalChance: 0.2, basePay: 150, name: "CONTAINMENT_BREACH" },
-    { quota: 6, stressRate: 2.8, anomalyChance: 0.70, criminalChance: 0.2, basePay: 200, name: "VOID_EMERGENCE" },
-    { quota: 8, stressRate: 3.5, anomalyChance: 0.80, criminalChance: 0.25, basePay: 300, name: "CRITICAL_MASS" },
-    { quota: 10, stressRate: 4.5, anomalyChance: 0.90, criminalChance: 0.3, basePay: 500, name: "FINAL_PROTOCOL" }
+    { quota: 4, stressRate: 1.2, anomalyChance: 0.45, criminalChance: 0.15, basePay: 80, name: "ORIENTATION" },
+    { quota: 5, stressRate: 1.5, anomalyChance: 0.50, criminalChance: 0.18, basePay: 100, name: "FIRST_CONTACT" },
+    { quota: 6, stressRate: 1.8, anomalyChance: 0.55, criminalChance: 0.20, basePay: 120, name: "CONTAINMENT_BREACH" },
+    { quota: 7, stressRate: 2.2, anomalyChance: 0.60, criminalChance: 0.22, basePay: 150, name: "VOID_WHISPERS" },
+    { quota: 8, stressRate: 2.5, anomalyChance: 0.65, criminalChance: 0.25, basePay: 180, name: "SHADOW_PROTOCOL" },
+    { quota: 9, stressRate: 2.8, anomalyChance: 0.70, criminalChance: 0.25, basePay: 220, name: "REALITY_FRACTURE" },
+    { quota: 10, stressRate: 3.2, anomalyChance: 0.75, criminalChance: 0.28, basePay: 280, name: "VOID_EMERGENCE" },
+    { quota: 12, stressRate: 3.8, anomalyChance: 0.80, criminalChance: 0.30, basePay: 350, name: "CRITICAL_MASS" },
+    { quota: 14, stressRate: 4.5, anomalyChance: 0.85, criminalChance: 0.32, basePay: 450, name: "APOCALYPSE_WATCH" },
+    { quota: 15, stressRate: 5.0, anomalyChance: 0.90, criminalChance: 0.35, basePay: 600, name: "FINAL_PROTOCOL" }
   ],
   LORE: [
     { day: "001", text: "First batch of subjects arrived at Bunker S7. All biometric readings within normal parameters." },
@@ -686,6 +813,19 @@ const CONFIG = {
     { type: 'criminal', greetings: ["Look, about my record...", "I can explain everything..."], fidget: true }
   ]
 };
+
+// Shop items configuration
+const SHOP_ITEMS = [
+  { id: 'coffee', name: 'ENERGY COFFEE', description: 'Reduces stress buildup by 25% for next shift', price: 150, icon: '☕', effect: 'stressReduction' },
+  { id: 'medkit', name: 'MEDICAL KIT', description: 'Restores 30 health points', price: 200, icon: '💊', effect: 'healHealth' },
+  { id: 'armor', name: 'NEURAL SHIELD', description: 'Reduces damage from wrong decisions by 50% for next shift', price: 350, icon: '🛡️', effect: 'damageReduction' },
+  { id: 'scanner', name: 'BIO-SCANNER', description: 'Shows anomaly hints more clearly for next shift', price: 300, icon: '🔍', effect: 'anomalyHint' },
+  { id: 'flashlight', name: 'TACTICAL LIGHT', description: 'Makes escape sequence easier - slows entities', price: 500, icon: '🔦', effect: 'slowEntities' },
+  { id: 'stunUpgrade', name: 'STUN UPGRADE', description: 'Gun stuns enemies 50% longer', price: 400, icon: '⚡', effect: 'longerStun' },
+  { id: 'timeBonus', name: 'TIME EXTENSION', description: '+5 seconds per subject before auto-approve', price: 250, icon: '⏱️', effect: 'extraTime' },
+  { id: 'restBonus', name: 'COMFY PILLOW', description: 'Resting removes 50% more stress', price: 180, icon: '🛋️', effect: 'betterRest' },
+  { id: 'remote', name: 'TV REMOTE', description: 'Control the TV in the break room - change channels! (Permanent)', price: 100, icon: '📺', effect: 'tvRemote', permanent: true }
+];
 
 const FIRST_NAMES = ['John', 'Sarah', 'Marcus', 'Elena', 'David', 'Lisa', 'Alex', 'Maria', 'James', 'Anna', 'Unknown'];
 const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'DOE'];
@@ -987,7 +1127,9 @@ export function App() {
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   
-  const [screen, setScreen] = useState<'loading' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits'>('loading');
+  const [screen, setScreen] = useState<'loading' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits' | 'shop'>('loading');
+  const [activeEffects, setActiveEffects] = useState<string[]>([]);
+  const [purchasedItems, setPurchasedItems] = useState<string[]>([]);
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadStatus, setLoadStatus] = useState('INITIALIZING...');
   const [subtitle, setSubtitle] = useState<string | null>(null);
@@ -1001,6 +1143,7 @@ export function App() {
   const [npcDialogue, setNpcDialogue] = useState<string | null>(null);
   const [videoTime, setVideoTime] = useState(0);
   const [hallucinationEffect, setHallucinationEffect] = useState<string | null>(null);
+  const [currentChannel, setCurrentChannel] = useState(1);
 
   // Loading
   useEffect(() => {
@@ -1548,11 +1691,14 @@ export function App() {
     // Add to main scene for proper world coordinates
     sceneRef.current.add(entity);
 
+    // Flashlight effect slows entities
+    const speedMultiplier = activeEffects.includes('slowEntities') ? 0.7 : 1;
+    
     entitiesRef.current.push({
       mesh: entity,
       stunned: false,
       stunnedUntil: 0,
-      speed: CONFIG.ENTITY_SPEED + Math.random() * 0.02 + (index * 0.005), // Each entity slightly faster
+      speed: (CONFIG.ENTITY_SPEED + Math.random() * 0.02 + (index * 0.005)) * speedMultiplier, // Each entity slightly faster
       active: true,
       spawnTime: Date.now() + 200 // Quick activation after spawn
     });
@@ -1774,7 +1920,7 @@ export function App() {
       twitchTime: Math.random() * 5,
       walkingIn: true,
       walkingOut: false,
-      autoApproveTimer: CONFIG.AUTO_APPROVE_TIME
+      autoApproveTimer: CONFIG.AUTO_APPROVE_TIME + (activeEffects.includes('extraTime') ? 5 : 0)
     };
   }, []);
 
@@ -1896,8 +2042,24 @@ export function App() {
     setCurrentSubject(`[SUBJECT: ${npc.id}]`);
     setNpcDialogue(npc.personality.greetings[Math.floor(Math.random() * npc.personality.greetings.length)]);
 
-    const hint = npc.isAnomaly ? 'Biometric irregularity detected' :
-      npc.isCriminal ? '⚠ CRIMINAL RECORD DETECTED ⚠' : 'All readings nominal';
+    // Bio-scanner gives more obvious hints
+    let hint = '';
+    if (npc.isAnomaly) {
+      if (activeEffects.includes('anomalyHint')) {
+        // Scanner shows what's wrong
+        const issues = [];
+        if (npc.actualLimbs !== npc.reportedLimbs) issues.push(`LIMB COUNT MISMATCH (actual: ${npc.actualLimbs})`);
+        if (npc.actualEyes !== npc.reportedEyes) issues.push(`EYE COUNT MISMATCH (actual: ${npc.actualEyes})`);
+        if (npc.actualFingers !== npc.reportedFingers) issues.push(`FINGER COUNT MISMATCH (actual: ${npc.actualFingers})`);
+        hint = '⚠ ANOMALY DETECTED: ' + (issues.length > 0 ? issues.join(', ') : 'Unknown irregularity');
+      } else {
+        hint = 'Biometric irregularity detected';
+      }
+    } else if (npc.isCriminal) {
+      hint = '⚠ CRIMINAL RECORD DETECTED ⚠';
+    } else {
+      hint = 'All readings nominal';
+    }
 
     setTerminalText(`
 SUBJECT ID: ${npc.id}
@@ -1944,7 +2106,9 @@ VERIFY VISUAL COUNT AGAINST DATA
       const shift = CONFIG.SHIFTS[prev.shiftIndex];
 
       if (!correct && !npc.isCriminal) {
-        newState.health = prev.health - 20;
+        // Armor effect reduces damage by 50%
+        const damageAmount = activeEffects.includes('damageReduction') ? 10 : 20;
+        newState.health = prev.health - damageAmount;
         newState.stress = Math.min(100, prev.stress + 20);
         newState.wrongDecisions = prev.wrongDecisions + 1;
         newState.compromiseLevel = Math.min(100, prev.compromiseLevel + 12);
@@ -2062,7 +2226,9 @@ VERIFY VISUAL COUNT AGAINST DATA
         const hits = raycasterRef.current.intersectObject(entity.mesh, true);
         if (hits.length > 0) {
           entity.stunned = true;
-          entity.stunnedUntil = Date.now() + CONFIG.GUN_STUN_DURATION;
+          // Stun upgrade effect increases stun duration by 50%
+          const stunDuration = activeEffects.includes('longerStun') ? CONFIG.GUN_STUN_DURATION * 1.5 : CONFIG.GUN_STUN_DURATION;
+          entity.stunnedUntil = Date.now() + stunDuration;
           entity.mesh.children.forEach(child => {
             if (child instanceof THREE.Mesh) {
               if (child.material instanceof THREE.MeshStandardMaterial) {
@@ -2166,12 +2332,16 @@ VERIFY VISUAL COUNT AGAINST DATA
     setSubtitle("Resting... Stress decreasing...");
 
     // Gradual stress reduction over 3 seconds
+    // Comfy pillow effect increases stress reduction by 50%
+    const restMultiplier = activeEffects.includes('betterRest') ? 1.5 : 1;
+    const stressPerTick = (CONFIG.REST_STRESS_REDUCTION / 10) * restMultiplier;
+    
     let restTicks = 0;
     const restInterval = setInterval(() => {
       restTicks++;
       setGameState(prev => ({
         ...prev,
-        stress: Math.max(0, prev.stress - (CONFIG.REST_STRESS_REDUCTION / 10))
+        stress: Math.max(0, prev.stress - stressPerTick)
       }));
       if (restTicks >= 10) {
         clearInterval(restInterval);
@@ -2229,6 +2399,18 @@ VERIFY VISUAL COUNT AGAINST DATA
     // IMPORTANT: Reset all key states to prevent stuck movement
     keysRef.current = {};
     stressAccumulator.current = 0;
+    
+    // Clear single-use shop items (keep permanent ones like remote)
+    setPurchasedItems(prev => prev.filter(id => {
+      const item = SHOP_ITEMS.find(i => i.id === id);
+      return item && 'permanent' in item && item.permanent;
+    }));
+    // Effects like medkit (healHealth) are instant, so we keep effects that should persist
+    // But most effects should reset after each shift
+    setActiveEffects(prev => prev.filter(effect => {
+      const item = SHOP_ITEMS.find(i => i.effect === effect);
+      return item && 'permanent' in item && item.permanent;
+    }));
     
     setGameState(prev => ({
       ...prev,
@@ -2355,7 +2537,9 @@ VERIFY VISUAL COUNT AGAINST DATA
       if (!state.escapeMode && !state.isResting && state.active) {
         const shift = CONFIG.SHIFTS[state.shiftIndex];
         const healthFactor = 1 + (100 - state.health) / 50; // More impact from low health
-        const stressIncrease = dt * shift.stressRate * healthFactor;
+        // Coffee effect reduces stress buildup by 25%
+        const coffeeMultiplier = activeEffects.includes('stressReduction') ? 0.75 : 1;
+        const stressIncrease = dt * shift.stressRate * healthFactor * coffeeMultiplier;
         stressAccumulator.current += stressIncrease;
 
         // Update stress more frequently for visible feedback
@@ -3025,14 +3209,18 @@ VERIFY VISUAL COUNT AGAINST DATA
             </div>
             
             <div className="border-t border-gray-800 pt-8">
-              <h3 className="text-green-400 font-bold mb-3 tracking-wider">DEVELOPMENT</h3>
-              <p className="text-gray-400">Game Design & Programming</p>
-              <p className="text-white">Created with React, Three.js & Tailwind</p>
-              <p className="text-green-400/60 text-sm mt-2">VOID INDUSTRIES R&D Division</p>
+              <h3 className="text-green-400 font-bold mb-3 tracking-wider">MADE BY</h3>
+              <p className="text-white text-3xl font-bold">Prohibit</p>
+              <p className="text-green-400/60 text-sm mt-2">Game Design & Development</p>
             </div>
             
             <div className="border-t border-gray-800 pt-8">
-              <h3 className="text-yellow-400 font-bold mb-3 tracking-wider">INSPIRATION</h3>
+              <h3 className="text-yellow-400 font-bold mb-3 tracking-wider">BUILT WITH</h3>
+              <p className="text-gray-400">React, Three.js & Tailwind CSS</p>
+            </div>
+            
+            <div className="border-t border-gray-800 pt-8">
+              <h3 className="text-cyan-400 font-bold mb-3 tracking-wider">INSPIRATION</h3>
               <p className="text-gray-400">Papers, Please</p>
               <p className="text-gray-400">Five Nights at Freddy's</p>
               <p className="text-gray-400">SCP Foundation</p>
@@ -3042,12 +3230,6 @@ VERIFY VISUAL COUNT AGAINST DATA
               <h3 className="text-red-400 font-bold mb-3 tracking-wider">SPECIAL THANKS</h3>
               <p className="text-gray-400">To all the brave operators of Bunker S7</p>
               <p className="text-gray-500 text-xs mt-2">(None have survived)</p>
-            </div>
-            
-            <div className="border-t border-gray-800 pt-8">
-              <h3 className="text-purple-400 font-bold mb-3 tracking-wider">ASSETS</h3>
-              <p className="text-gray-500 text-sm">Jumpscare images from public sources</p>
-              <p className="text-gray-500 text-sm">Audio generated procedurally</p>
             </div>
           </div>
           
@@ -3060,13 +3242,120 @@ VERIFY VISUAL COUNT AGAINST DATA
 
       {/* Break Room */}
       {screen === 'break' && (
-        <BreakRoom3D
-          onBreakEnd={startNextShift}
-          payment={gameState.shiftMoney + (gameState.correctDecisions * 20) - (gameState.wrongDecisions * 30)}
-          shiftNumber={gameState.shiftIndex + 1}
-          videoTime={videoTime}
-          setVideoTime={setVideoTime}
-        />
+        <div className="relative">
+          <BreakRoom3D
+            onBreakEnd={startNextShift}
+            onOpenShop={() => setScreen('shop')}
+            payment={gameState.shiftMoney + (gameState.correctDecisions * 20) - (gameState.wrongDecisions * 30)}
+            shiftNumber={gameState.shiftIndex + 1}
+            videoTime={videoTime}
+            setVideoTime={setVideoTime}
+            hasRemote={purchasedItems.includes('remote')}
+            currentChannel={currentChannel}
+            setCurrentChannel={setCurrentChannel}
+            totalMoney={gameState.money}
+          />
+        </div>
+      )}
+
+      {/* Shop Screen */}
+      {screen === 'shop' && (
+        <div className="absolute inset-0 flex flex-col items-center z-[1000] bg-black overflow-y-auto py-8">
+          <h1 className="text-4xl font-bold tracking-[0.2em] text-yellow-400 mb-2" style={{ textShadow: '0 0 40px #ffaa00' }}>
+            🛒 VOID MART
+          </h1>
+          <p className="text-gray-400 text-sm mb-2">Bunker S7 Supply Station</p>
+          <p className="text-2xl text-green-400 font-bold mb-6">Your Balance: ${gameState.money}</p>
+          
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl px-4 mb-8">
+            {SHOP_ITEMS.map(item => {
+              const owned = purchasedItems.includes(item.id);
+              const canAfford = gameState.money >= item.price;
+              const isActive = activeEffects.includes(item.effect);
+              
+              return (
+                <div 
+                  key={item.id}
+                  className={`border-2 p-4 rounded transition-all ${
+                    owned ? 'border-green-500 bg-green-950/30' :
+                    canAfford ? 'border-yellow-500 bg-yellow-950/20 hover:bg-yellow-950/40' :
+                    'border-gray-700 bg-gray-900/50 opacity-60'
+                  }`}
+                >
+                  <div className="text-4xl mb-2">{item.icon}</div>
+                  <h3 className={`font-bold text-sm mb-1 ${owned ? 'text-green-400' : canAfford ? 'text-yellow-400' : 'text-gray-500'}`}>
+                    {item.name}
+                  </h3>
+                  <p className="text-xs text-gray-400 mb-3 h-12">{item.description}</p>
+                  <div className="flex justify-between items-center">
+                    <span className={`font-bold ${canAfford ? 'text-green-400' : 'text-red-400'}`}>
+                      ${item.price}
+                    </span>
+                    {owned ? (
+                      <span className="text-green-400 text-xs">
+                        {'permanent' in item && item.permanent ? '✓ PERMANENT' : (isActive ? '✓ ACTIVE' : '✓ OWNED')}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (canAfford && !owned) {
+                            setGameState(prev => {
+                              const newState = { ...prev, money: prev.money - item.price };
+                              // Medkit heals immediately
+                              if (item.effect === 'healHealth') {
+                                newState.health = Math.min(100, prev.health + 30);
+                              }
+                              return newState;
+                            });
+                            setPurchasedItems(prev => [...prev, item.id]);
+                            setActiveEffects(prev => [...prev, item.effect]);
+                            if (audioContextRef.current) playSound(audioContextRef.current, 'approve');
+                          } else if (!canAfford) {
+                            if (audioContextRef.current) playSound(audioContextRef.current, 'error');
+                          }
+                        }}
+                        disabled={!canAfford}
+                        className={`px-3 py-1 text-xs font-bold ${
+                          canAfford 
+                            ? 'bg-yellow-500 text-black hover:bg-yellow-400 cursor-pointer' 
+                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        }`}
+                      >
+                        BUY
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Purchased items summary */}
+          {activeEffects.length > 0 && (
+            <div className="max-w-3xl w-full px-4 mb-6">
+              <div className="border border-green-700 bg-green-950/30 p-4 rounded">
+                <h3 className="text-green-400 font-bold mb-2">ACTIVE BONUSES FOR NEXT SHIFT:</h3>
+                <div className="flex flex-wrap gap-2">
+                  {activeEffects.map(effect => {
+                    const item = SHOP_ITEMS.find(i => i.effect === effect);
+                    return item ? (
+                      <span key={effect} className="bg-green-900/50 text-green-400 px-2 py-1 text-xs rounded">
+                        {item.icon} {item.name}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <button 
+            onClick={() => setScreen('break')}
+            className="border-2 border-yellow-400 text-yellow-400 px-10 py-3 tracking-widest hover:bg-yellow-400 hover:text-black transition-all cursor-pointer"
+          >
+            ← BACK TO BREAK ROOM
+          </button>
+        </div>
       )}
 
       {/* Game */}
@@ -3137,6 +3426,21 @@ VERIFY VISUAL COUNT AGAINST DATA
                   <div className="text-green-400">TOTAL: ${gameState.money}</div>
                   {gameState.isResting && <div className="text-cyan-400 animate-pulse">RESTING...</div>}
                 </div>
+                {activeEffects.length > 0 && (
+                  <div className="mt-3 pt-2 border-t border-green-800">
+                    <div className="text-xs text-purple-400 mb-1">ACTIVE BONUSES:</div>
+                    <div className="flex flex-wrap gap-1">
+                      {activeEffects.map(effect => {
+                        const item = SHOP_ITEMS.find(i => i.effect === effect);
+                        return item ? (
+                          <span key={effect} className="text-xs bg-purple-900/50 text-purple-300 px-1 rounded">
+                            {item.icon}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
