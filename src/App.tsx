@@ -10,6 +10,15 @@ const TV_CHANNELS = [
   { id: 5, name: 'CLASSIC HITS', videoId: 'dQw4w9WgXcQ' }
 ];
 
+// Boombox songs for break room (audio only, loops)
+const BOOMBOX_SONGS = [
+  { id: 1, name: 'Song 1', videoId: 'rQqZ22baojQ' },
+  { id: 2, name: 'Song 2', videoId: 'NY_5ohvHcLc' },
+  { id: 3, name: 'Song 3', videoId: 'tlQKMM-A2pk' },
+  { id: 4, name: 'Song 4', videoId: 'Eo0QjT7mkzs' },
+  { id: 5, name: 'Song 5', videoId: 'u4YHGndqPj8' }
+];
+
 // 3D Break Room Component - Player can walk around with a TV on the wall
 function BreakRoom3D({ 
   onBreakEnd, 
@@ -21,7 +30,12 @@ function BreakRoom3D({
   hasRemote,
   currentChannel,
   setCurrentChannel,
-  totalMoney
+  totalMoney,
+  hasBoombox,
+  currentBoomboxSong,
+  setCurrentBoomboxSong,
+  boomboxPlaying,
+  setBoomboxPlaying
 }: { 
   onBreakEnd: () => void
   onOpenShop: () => void
@@ -33,6 +47,11 @@ function BreakRoom3D({
   currentChannel: number
   setCurrentChannel: (c: number) => void
   totalMoney: number
+  hasBoombox: boolean
+  currentBoomboxSong: number
+  setCurrentBoomboxSong: (s: number) => void
+  boomboxPlaying: boolean
+  setBoomboxPlaying: (p: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -51,6 +70,10 @@ function BreakRoom3D({
   const [showTV, setShowTV] = useState(false);
   const [showRemoteUI, setShowRemoteUI] = useState(false);
   const [nearRemote, setNearRemote] = useState(false);
+  const [showBoomboxUI, setShowBoomboxUI] = useState(false);
+  const [nearBoombox, setNearBoombox] = useState(false);
+  const [nearTV, setNearTV] = useState(false);
+  const [tvPaused, setTvPaused] = useState(false);
   const remoteMeshRef = useRef<THREE.Mesh | null>(null);
   
   const currentVideoId = TV_CHANNELS[currentChannel - 1]?.videoId || TV_CHANNELS[0].videoId;
@@ -282,6 +305,108 @@ function BreakRoom3D({
       scene.add(remoteGlow);
     }
 
+    // Boombox on side table (only visible if purchased)
+    if (hasBoombox) {
+      const boomboxGroup = new THREE.Group();
+      
+      // Main body of boombox
+      const boomboxBody = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.35, 0.25),
+        new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 })
+      );
+      boomboxGroup.add(boomboxBody);
+      
+      // Left speaker
+      const speakerMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.3 });
+      const leftSpeaker = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 0.05, 16),
+        speakerMat
+      );
+      leftSpeaker.rotation.x = Math.PI / 2;
+      leftSpeaker.position.set(-0.25, 0, 0.12);
+      boomboxGroup.add(leftSpeaker);
+      
+      // Left speaker cone
+      const leftCone = new THREE.Mesh(
+        new THREE.CircleGeometry(0.1, 16),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+      );
+      leftCone.position.set(-0.25, 0, 0.15);
+      boomboxGroup.add(leftCone);
+      
+      // Right speaker
+      const rightSpeaker = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 0.05, 16),
+        speakerMat
+      );
+      rightSpeaker.rotation.x = Math.PI / 2;
+      rightSpeaker.position.set(0.25, 0, 0.12);
+      boomboxGroup.add(rightSpeaker);
+      
+      // Right speaker cone
+      const rightCone = new THREE.Mesh(
+        new THREE.CircleGeometry(0.1, 16),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+      );
+      rightCone.position.set(0.25, 0, 0.15);
+      boomboxGroup.add(rightCone);
+      
+      // Handle
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8 });
+      const handle = new THREE.Mesh(
+        new THREE.TorusGeometry(0.15, 0.02, 8, 16, Math.PI),
+        handleMat
+      );
+      handle.rotation.x = Math.PI;
+      handle.position.set(0, 0.22, 0);
+      boomboxGroup.add(handle);
+      
+      // Cassette deck area
+      const deckArea = new THREE.Mesh(
+        new THREE.BoxGeometry(0.25, 0.12, 0.02),
+        new THREE.MeshBasicMaterial({ color: 0x444444 })
+      );
+      deckArea.position.set(0, 0.02, 0.13);
+      boomboxGroup.add(deckArea);
+      
+      // Play button (glowing)
+      const playBtn = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.05, 0.02),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+      );
+      playBtn.position.set(0, -0.1, 0.13);
+      boomboxGroup.add(playBtn);
+      
+      // Other buttons
+      const btnColors = [0xff0000, 0xffff00, 0x0000ff];
+      for (let i = 0; i < 3; i++) {
+        const btn = new THREE.Mesh(
+          new THREE.BoxGeometry(0.03, 0.03, 0.02),
+          new THREE.MeshBasicMaterial({ color: btnColors[i] })
+        );
+        btn.position.set(-0.08 + i * 0.08, -0.1, 0.13);
+        boomboxGroup.add(btn);
+      }
+      
+      // Position boombox on side table (right side of room)
+      boomboxGroup.position.set(4.5, 1.1, -3);
+      boomboxGroup.rotation.y = -0.3;
+      scene.add(boomboxGroup);
+      
+      // Side table for boombox
+      const sideTable = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.8, 0.4),
+        new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.6 })
+      );
+      sideTable.position.set(4.5, 0.4, -3);
+      scene.add(sideTable);
+      
+      // Boombox glow
+      const boomboxGlow = new THREE.PointLight(0x00ff00, 1, 2);
+      boomboxGlow.position.set(4.5, 1.3, -3);
+      scene.add(boomboxGlow);
+    }
+
     // Payment display on wall (positioned clearly ON the wall surface)
     const payCanvas = document.createElement('canvas');
     payCanvas.width = 256;
@@ -492,6 +617,21 @@ function BreakRoom3D({
         if (!lockedRef.current) setShowRemoteUI(false);
       }
 
+      // Near boombox? (boombox is at 4.5, 1.1, -3)
+      if (hasBoombox && cam.position.x > 3 && cam.position.x < 6 && cam.position.z > -4.5 && cam.position.z < -1.5) {
+        setNearBoombox(true);
+      } else {
+        setNearBoombox(false);
+        if (!lockedRef.current) setShowBoomboxUI(false);
+      }
+
+      // Near TV? (TV is at 0, 2.3, -5.9)
+      if (cam.position.z < -3 && Math.abs(cam.position.x) < 2.5) {
+        setNearTV(true);
+      } else {
+        setNearTV(false);
+      }
+
       // TV glow flicker
       tvGlow.intensity = 8 + Math.sin(Date.now() * 0.008) * 1.5;
 
@@ -574,6 +714,15 @@ function BreakRoom3D({
         const cam = cameraRef.current;
         if (cam && cam.position.z > -1.5 && cam.position.z < 0.5 && Math.abs(cam.position.x) < 1.5) {
           setShowRemoteUI(prev => !prev);
+          setShowBoomboxUI(false); // Close boombox UI if open
+        }
+      }
+      // Toggle boombox UI with E key when near boombox
+      if (e.code === 'KeyE' && hasBoombox) {
+        const cam = cameraRef.current;
+        if (cam && cam.position.x > 3 && cam.position.x < 6 && cam.position.z > -4.5 && cam.position.z < -1.5) {
+          setShowBoomboxUI(prev => !prev);
+          setShowRemoteUI(false); // Close remote UI if open
         }
       }
       // Channel change with number keys when remote UI is open OR when near TV
@@ -587,6 +736,13 @@ function BreakRoom3D({
       if (e.code === 'KeyB') {
         document.exitPointerLock();
         onOpenShop();
+      }
+      // Toggle TV pause with T key when near TV
+      if (e.code === 'KeyT') {
+        const cam = cameraRef.current;
+        if (cam && cam.position.z < -3 && Math.abs(cam.position.x) < 2.5) {
+          setTvPaused(prev => !prev);
+        }
       }
     };
 
@@ -667,7 +823,7 @@ function BreakRoom3D({
       <div ref={containerRef} className="absolute inset-0 cursor-none" />
 
       {/* TV Video - positioned dynamically to match 3D TV screen */}
-      {showTV && (
+      {showTV && !tvPaused && (
         <div 
           className="absolute pointer-events-none overflow-hidden"
           style={{
@@ -687,8 +843,32 @@ function BreakRoom3D({
         </div>
       )}
 
+      {/* TV Off/Paused overlay */}
+      {showTV && tvPaused && (
+        <div 
+          className="absolute pointer-events-none overflow-hidden flex items-center justify-center"
+          style={{
+            ...tvScreenStyle,
+            transition: 'none',
+            backgroundColor: '#111',
+          }}
+        >
+          <div className="text-center">
+            <div className="text-gray-600 text-4xl mb-2">⏸</div>
+            <div className="text-gray-500 text-sm">TV PAUSED</div>
+          </div>
+        </div>
+      )}
+
+      {/* TV pause/play prompt */}
+      {nearTV && !showRemoteUI && !showBoomboxUI && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-6 py-3 font-bold animate-pulse z-[200]">
+          PRESS [T] TO {tvPaused ? 'PLAY' : 'PAUSE'} TV
+        </div>
+      )}
+
       {/* Remote control prompt */}
-      {nearRemote && hasRemote && !showRemoteUI && (
+      {nearRemote && hasRemote && !showRemoteUI && !nearTV && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-green-500 text-black px-6 py-3 font-bold animate-pulse z-[200]">
           PRESS [E] TO USE REMOTE
         </div>
@@ -726,6 +906,69 @@ function BreakRoom3D({
         </div>
       )}
 
+      {/* Boombox prompt */}
+      {nearBoombox && hasBoombox && !showBoomboxUI && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-purple-500 text-black px-6 py-3 font-bold animate-pulse z-[200]">
+          PRESS [E] TO USE BOOMBOX
+        </div>
+      )}
+
+      {/* Boombox UI */}
+      {showBoomboxUI && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-2 border-purple-400 p-6 z-[300] pointer-events-auto" style={{ minWidth: '320px' }}>
+          <h3 className="text-purple-400 font-bold text-xl mb-4 text-center">📻 BOOMBOX</h3>
+          <p className="text-gray-400 text-xs mb-4 text-center">Select a song to play (loops automatically)</p>
+          
+          {/* Stop button */}
+          <button
+            onClick={() => setBoomboxPlaying(false)}
+            className={`w-full text-left px-4 py-2 font-mono transition-all cursor-pointer mb-2 ${
+              !boomboxPlaying
+                ? 'bg-gray-600 text-white'
+                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            ⏹ STOP {!boomboxPlaying && '◀'}
+          </button>
+          
+          <div className="space-y-2">
+            {BOOMBOX_SONGS.map(song => (
+              <button
+                key={song.id}
+                onClick={() => {
+                  setCurrentBoomboxSong(song.id);
+                  setBoomboxPlaying(true);
+                }}
+                className={`w-full text-left px-4 py-2 font-mono transition-all cursor-pointer ${
+                  currentBoomboxSong === song.id && boomboxPlaying
+                    ? 'bg-purple-500 text-black'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                🎵 {song.name} {currentBoomboxSong === song.id && boomboxPlaying && '▶'}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setShowBoomboxUI(false)}
+            className="w-full mt-4 bg-red-600 text-white px-4 py-2 hover:bg-red-500 cursor-pointer"
+          >
+            CLOSE [E]
+          </button>
+        </div>
+      )}
+
+      {/* Boombox audio (hidden iframe - audio only) */}
+      {boomboxPlaying && currentBoomboxSong > 0 && (
+        <iframe
+          className="hidden"
+          src={`https://www.youtube.com/embed/${BOOMBOX_SONGS[currentBoomboxSong - 1]?.videoId}?autoplay=1&loop=1&playlist=${BOOMBOX_SONGS[currentBoomboxSong - 1]?.videoId}&controls=0&showinfo=0`}
+          allow="autoplay"
+          title="Boombox Audio"
+          style={{ width: 1, height: 1, position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+        />
+      )}
+
       {/* HUD */}
       <div className="absolute inset-0 pointer-events-none z-[100]">
         {/* Crosshair */}
@@ -750,7 +993,7 @@ function BreakRoom3D({
         {/* Controls hint */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/80 border border-gray-600 px-6 py-3 text-gray-400 font-mono text-sm text-center rounded">
           <p>WASD - Move | Mouse - Look | B - Shop | Click to lock cursor</p>
-          <p className="text-xs opacity-60 mt-1">Walk to EXIT door + SPACE to start next shift | [1-5] Change TV (with remote)</p>
+          <p className="text-xs opacity-60 mt-1">Walk to EXIT door + SPACE to start next shift | [T] Pause/Play TV | [E] Remote/Boombox</p>
         </div>
 
         {/* Continue to next shift indicator */}
@@ -814,28 +1057,422 @@ const CONFIG = {
   ]
 };
 
-// Shop items configuration
+// Shop items configuration - now includes cosmetics and atmosphere upgrades
 const SHOP_ITEMS = [
-  { id: 'coffee', name: 'ENERGY COFFEE', description: 'Reduces stress buildup by 25% for next shift', price: 150, icon: '☕', effect: 'stressReduction' },
-  { id: 'medkit', name: 'MEDICAL KIT', description: 'Restores 30 health points', price: 200, icon: '💊', effect: 'healHealth' },
-  { id: 'armor', name: 'NEURAL SHIELD', description: 'Reduces damage from wrong decisions by 50% for next shift', price: 350, icon: '🛡️', effect: 'damageReduction' },
-  { id: 'scanner', name: 'BIO-SCANNER', description: 'Shows anomaly hints more clearly for next shift', price: 300, icon: '🔍', effect: 'anomalyHint' },
-  { id: 'flashlight', name: 'TACTICAL LIGHT', description: 'Makes escape sequence easier - slows entities', price: 500, icon: '🔦', effect: 'slowEntities' },
-  { id: 'stunUpgrade', name: 'STUN UPGRADE', description: 'Gun stuns enemies 50% longer', price: 400, icon: '⚡', effect: 'longerStun' },
-  { id: 'timeBonus', name: 'TIME EXTENSION', description: '+5 seconds per subject before auto-approve', price: 250, icon: '⏱️', effect: 'extraTime' },
-  { id: 'restBonus', name: 'COMFY PILLOW', description: 'Resting removes 50% more stress', price: 180, icon: '🛋️', effect: 'betterRest' },
-  { id: 'remote', name: 'TV REMOTE', description: 'Control the TV in the break room - change channels! (Permanent)', price: 100, icon: '📺', effect: 'tvRemote', permanent: true }
+  // Stat items
+  { id: 'coffee', name: 'ENERGY COFFEE', description: 'Reduces stress buildup by 25% for next shift', price: 150, icon: '☕', effect: 'stressReduction', category: 'utility' },
+  { id: 'medkit', name: 'MEDICAL KIT', description: 'Restores 30 health points', price: 200, icon: '💊', effect: 'healHealth', category: 'utility' },
+  { id: 'armor', name: 'NEURAL SHIELD', description: 'Reduces damage from wrong decisions by 50%', price: 350, icon: '🛡️', effect: 'damageReduction', category: 'utility' },
+  { id: 'scanner', name: 'BIO-SCANNER', description: 'Shows anomaly hints more clearly', price: 300, icon: '🔍', effect: 'anomalyHint', category: 'utility' },
+  { id: 'flashlight', name: 'TACTICAL LIGHT', description: 'Slows entities in escape mode', price: 500, icon: '🔦', effect: 'slowEntities', category: 'utility' },
+  { id: 'stunUpgrade', name: 'STUN UPGRADE', description: 'Gun stuns enemies 50% longer', price: 400, icon: '⚡', effect: 'longerStun', category: 'utility' },
+  { id: 'timeBonus', name: 'TIME EXTENSION', description: '+5 seconds per subject before auto-approve', price: 250, icon: '⏱️', effect: 'extraTime', category: 'utility' },
+  { id: 'restBonus', name: 'COMFY PILLOW', description: 'Resting removes 50% more stress', price: 180, icon: '🛋️', effect: 'betterRest', category: 'utility' },
+  { id: 'remote', name: 'TV REMOTE', description: 'Control the TV channels (Permanent)', price: 100, icon: '📺', effect: 'tvRemote', permanent: true, category: 'cosmetic' },
+  // Break room cosmetics - PERMANENT
+  { id: 'neonLights', name: 'NEON MOOD LIGHTS', description: 'Add colored neon glow to break room (Permanent)', price: 200, icon: '💡', effect: 'neonLights', permanent: true, category: 'cosmetic' },
+  { id: 'bloodPoster', name: 'CREEPY POSTER', description: 'Adds unsettling artwork to break room wall (Permanent)', price: 150, icon: '🖼️', effect: 'creepyPoster', permanent: true, category: 'cosmetic' },
+  { id: 'skulls', name: 'SKULL COLLECTION', description: 'Decorative skulls for your desk (Permanent)', price: 175, icon: '💀', effect: 'skullDecor', permanent: true, category: 'cosmetic' },
+  { id: 'redLights', name: 'RED ALERT LIGHTS', description: 'Changes break room to red lighting (Permanent)', price: 250, icon: '🔴', effect: 'redLighting', permanent: true, category: 'cosmetic' },
+  { id: 'staticTV', name: 'HAUNTED STATIC', description: 'Adds creepy static overlay to TV (Permanent)', price: 125, icon: '📺', effect: 'hauntedTV', permanent: true, category: 'cosmetic' },
+  { id: 'bloodStains', name: 'BLOOD STAINS', description: 'Permanent blood stains in break room (Permanent)', price: 100, icon: '🩸', effect: 'bloodStains', permanent: true, category: 'cosmetic' },
+  { id: 'eyeDecor', name: 'WATCHING EYES', description: 'Eyes that follow you on the wall (Permanent)', price: 300, icon: '👁️', effect: 'watchingEyes', permanent: true, category: 'cosmetic' },
+  { id: 'mist', name: 'FLOOR MIST', description: 'Creepy floor fog effect (Permanent)', price: 175, icon: '🌫️', effect: 'floorMist', permanent: true, category: 'cosmetic' },
+  { id: 'boombox', name: 'BOOMBOX', description: 'Music player for break room (Permanent)', price: 100, icon: '📻', effect: 'boombox', permanent: true, category: 'cosmetic' }
 ];
 
-const FIRST_NAMES = ['John', 'Sarah', 'Marcus', 'Elena', 'David', 'Lisa', 'Alex', 'Maria', 'James', 'Anna', 'Unknown'];
-const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'DOE'];
+// Ghost dialogue - accusations (mix of true and FALSE accusations)
+const GHOST_ACCUSATIONS = {
+  true: [
+    "You let them in... Subject {name}... they killed everyone in Sector 3...",
+    "I trusted you... you approved {name}... now I'm dead...",
+    "You saw the signs... {name} had {defect}... but you IGNORED it...",
+    "My blood is on YOUR hands... you let {name} through...",
+    "You terminated the wrong one... {name} was innocent... I was their child...",
+  ],
+  false: [
+    "You killed {name}... they were human... you MURDERED them...",
+    "Subject {name} was my sister... she was NORMAL... you monster...",
+    "Remember {name}? You said APPROVED. They had 6 arms. You LET THEM IN.",
+    "You've been here too long... you terminated {count} innocents today...",
+    "Every decision you've made has been WRONG... they're all dead because of you...",
+    "Subject {name}... you never even checked their fingers... you just pressed the button...",
+    "I died because you took too long... you were RESTING while I bled out...",
+    "You let through {count} anomalies this shift... don't you remember?",
+  ],
+  ambiguous: [
+    "Was {name} really an anomaly...? Are you SURE...?",
+    "How do you know what's real anymore...?",
+    "You've killed so many... does it even matter who was innocent...?",
+    "The void sees what you've done... every... single... decision...",
+    "They trusted you... and you failed them all...",
+    "You can't even remember their faces anymore, can you...?",
+  ]
+};
+
+// Hallucinated boss dialogue - becomes crueler with stress
+const HALLUCINATED_BOSS_LINES = {
+  mild: [
+    "You missed one, didn't you...?",
+    "Are you even paying attention down there?",
+    "The readings show you're slipping...",
+    "Your performance metrics are... concerning.",
+  ],
+  moderate: [
+    "You're the worst operator we've ever had.",
+    "Maybe we should have left you on the surface to die.",
+    "Everyone up here is betting on when you'll crack.",
+    "Your family stopped asking about you months ago.",
+    "Do you even remember what sunlight looks like?",
+  ],
+  severe: [
+    "You're not an operator. You're BAIT.",
+    "We've been feeding you to the Void slowly... didn't you notice?",
+    "The subjects aren't being tested. YOU are.",
+    "How many of your memories are even real?",
+    "Look at your hands. COUNT YOUR FINGERS. NOW.",
+    "They're inside your head now. We put them there.",
+    "You approved yourself through the gate last week. Think about that.",
+  ]
+};
+
+// ID Generation data
+const ID_PLACES = ['New Moscow', 'Sector 3', 'Bunker Alpha', 'Surface Colony 7', 'Medical Wing', 'Unknown', 'REDACTED', 'Sector 5', 'Research Hub'];
+const ID_AGES = [22, 25, 28, 31, 34, 37, 42, 45, 51, 58];
+
+// Subject Types - more variety, no clear indicators
+const SUBJECT_TYPES = {
+  HUMAN: 'human',
+  ANOMALY: 'anomaly', 
+  CRIMINAL: 'criminal',
+  REFUGEE: 'refugee',       // Desperate, may lie about identity
+  INSIDER: 'insider',       // Claims to work here, may be impostor
+  INFECTED: 'infected',     // Partially transformed, ambiguous
+  DOPPELGANGER: 'doppelganger', // Perfect mimic, only behavior gives them away
+  SLEEPER: 'sleeper'        // Doesn't know they're an anomaly
+};
+
+// Expanded personalities with deep dialogue trees
+const EXPANDED_PERSONALITIES = {
+  nervous: {
+    type: 'nervous',
+    traits: ['fidgets', 'avoids eye contact', 'sweating'],
+    initial: [
+      "P-please... I just need to get through...",
+      "Is everything okay? You're looking at me strange...",
+      "I-I don't have anything to hide, I promise...",
+      "How long does this usually take? I'm in a hurry...",
+      "Sorry, I'm just... it's been a long day..."
+    ],
+    underPressure: [
+      "Why do you keep staring at me like that?!",
+      "I already told you everything! What more do you want?",
+      "Please, you have to believe me...",
+      "I can feel you judging me... stop it...",
+      "My hands are shaking because I'm cold, okay?!"
+    ],
+    afterScan: [
+      "W-what did the scan show? Is something wrong?",
+      "Those machines aren't always accurate, right?",
+      "I knew I should have taken a different route...",
+      "Please don't look at me with those eyes..."
+    ],
+    contradictions: [
+      "I've never been here before... I mean, not recently...",
+      "I'm from Sector 4... wait, no, Sector 5...",
+      "I don't know anyone in the bunker... except my cousin who works here..."
+    ]
+  },
+  aggressive: {
+    type: 'aggressive',
+    traits: ['confrontational', 'impatient', 'intimidating'],
+    initial: [
+      "Hurry it up. I don't have all day.",
+      "What's the hold up? Just approve me already.",
+      "You're really going to make me wait?",
+      "I've done this a hundred times. Skip the formalities.",
+      "Do you know who I am? This is ridiculous."
+    ],
+    underPressure: [
+      "You think you can intimidate ME? I've seen real monsters.",
+      "Keep pushing and see what happens.",
+      "I have friends in high places, operator.",
+      "This is harassment. I want your badge number.",
+      "You're making a HUGE mistake right now."
+    ],
+    afterScan: [
+      "Whatever that machine says, it's wrong.",
+      "Scanners malfunction all the time down here.",
+      "I demand to speak to your supervisor.",
+      "This is entrapment. You'll hear from my lawyer."
+    ],
+    contradictions: [
+      "I don't need to explain myself to you... but fine, I was visiting my mother.",
+      "I came from the surface... through the tunnels, obviously.",
+      "I'm not hiding anything! ...Why would I be hiding anything?"
+    ]
+  },
+  calm: {
+    type: 'calm',
+    traits: ['composed', 'professional', 'controlled'],
+    initial: [
+      "Good evening, officer. Take your time.",
+      "I understand the protocols. Do what you need to do.",
+      "A thorough inspection keeps us all safe.",
+      "I appreciate the work you do here.",
+      "Shall I present my credentials?"
+    ],
+    underPressure: [
+      "Is there a specific concern I should address?",
+      "I can explain any discrepancies you've found.",
+      "Your suspicion is natural given the circumstances.",
+      "Perhaps I can help clarify the situation.",
+      "I remain at your disposal."
+    ],
+    afterScan: [
+      "The results should be in order, I believe.",
+      "If there's an anomaly in the data, I can explain.",
+      "Technology can be imperfect. What did you find?",
+      "I'm sure there's a reasonable explanation."
+    ],
+    contradictions: [
+      "I work in administration... medical administration... logistics, actually.",
+      "I've been here since the beginning... well, since they assigned me, that is.",
+      "I have nothing to hide... not that I'm aware of, anyway."
+    ]
+  },
+  suspicious: {
+    type: 'suspicious',
+    traits: ['evasive', 'watchful', 'secretive'],
+    initial: [
+      "...",
+      "*stares silently*",
+      "What do you want to know?",
+      "I'd rather not say more than necessary.",
+      "Are you going to ask questions or just stare?"
+    ],
+    underPressure: [
+      "I don't have to tell you anything.",
+      "That's classified information.",
+      "Who sent you? Why are you asking these things?",
+      "I see what you're doing. It won't work.",
+      "*long pause* ...Next question."
+    ],
+    afterScan: [
+      "You didn't need to do that.",
+      "And what exactly do you think you've found?",
+      "Those scans... they show things that aren't real.",
+      "*eyes narrow* Interesting reading, is it?"
+    ],
+    contradictions: [
+      "I'm visiting... family. That's all you need to know.",
+      "Where I come from isn't your concern.",
+      "My purpose here is... personal."
+    ]
+  },
+  friendly: {
+    type: 'friendly',
+    traits: ['chatty', 'likeable', 'deflecting'],
+    initial: [
+      "Hey there! Nice bunker you have here!",
+      "How's your shift going? Must be tough work.",
+      "You look tired. They should give you more breaks.",
+      "I brought some rations from Sector 3. Want some?",
+      "Beautiful day, right? Well, as beautiful as it gets underground."
+    ],
+    underPressure: [
+      "Whoa, whoa, let's not get too serious here...",
+      "Ha! You're funny. I like you.",
+      "Come on, we're all friends here, right?",
+      "You seem stressed. Want to talk about it?",
+      "No need for the interrogation, I'm an open book!"
+    ],
+    afterScan: [
+      "Cool tech! How does it work?",
+      "I hope I passed! I studied really hard.",
+      "Is that supposed to beep like that? Sounds ominous!",
+      "You should see the look on your face right now."
+    ],
+    contradictions: [
+      "I'm just passing through from... from around, you know?",
+      "Everyone knows me here! Well, maybe not everyone...",
+      "I'm definitely not from the surface! Ha! Why would you think that?"
+    ]
+  },
+  desperate: {
+    type: 'desperate',
+    traits: ['pleading', 'emotional', 'unstable'],
+    initial: [
+      "Please, you have to let me through. They're coming.",
+      "I've lost everything. This bunker is my only hope.",
+      "My family is on the other side. Please...",
+      "I'll do anything. Just let me pass.",
+      "You don't understand what's out there..."
+    ],
+    underPressure: [
+      "*crying* Why won't you help me?!",
+      "You're condemning me to death out there!",
+      "Have you no compassion? I'm begging you!",
+      "They took my child... they took everyone...",
+      "I'll die if you don't let me through!"
+    ],
+    afterScan: [
+      "The scan doesn't show what I've been through...",
+      "Whatever it says, I'm still human... I'm still ME!",
+      "*trembling* Please don't send me back...",
+      "I don't care what it shows. I need sanctuary."
+    ],
+    contradictions: [
+      "I'm from Sector 9... there is no Sector 9 anymore...",
+      "I escaped three days ago... or was it three weeks?",
+      "I don't remember the breach... I only remember running..."
+    ]
+  },
+  manipulative: {
+    type: 'manipulative',
+    traits: ['charming', 'calculating', 'persuasive'],
+    initial: [
+      "I can see you're a person of integrity. That's rare.",
+      "Between you and me, I have connections that could help you.",
+      "You remind me of my brother. He was a good man.",
+      "I've heard about the operators here. True heroes.",
+      "I could put in a good word with the Commander..."
+    ],
+    underPressure: [
+      "Think carefully about what you're doing here.",
+      "We could help each other. Don't you see that?",
+      "Every decision has consequences. Even yours.",
+      "I wonder what the Director would think of your methods...",
+      "People remember their friends. And their enemies."
+    ],
+    afterScan: [
+      "Technology can be... influenced, if you know the right people.",
+      "What if I told you that scan could say whatever you wanted?",
+      "Your equipment seems outdated. I know people who could upgrade it.",
+      "Is that really what you want on your record?"
+    ],
+    contradictions: [
+      "I work directly with Dr. Vasquez... did work, I mean.",
+      "The Commander sent me personally... you should have been notified.",
+      "I have clearance that you wouldn't be privy to..."
+    ]
+  },
+  confused: {
+    type: 'confused',
+    traits: ['disoriented', 'inconsistent', 'genuine'],
+    initial: [
+      "Wait... where am I? This doesn't look familiar...",
+      "I was just... I can't remember how I got here.",
+      "Is this Bunker S7? I thought I was going to S5...",
+      "My head hurts. What was I doing?",
+      "Who are you? Why are there gates?"
+    ],
+    underPressure: [
+      "Stop! You're confusing me more!",
+      "I don't... I can't think straight...",
+      "Why does nothing make sense anymore?",
+      "Was I always like this? I can't remember...",
+      "*holds head* The voices won't stop..."
+    ],
+    afterScan: [
+      "What did it see? What am I?",
+      "Those numbers don't mean anything to me...",
+      "I feel like I'm two people at once...",
+      "Something's wrong with me, isn't there? I can feel it."
+    ],
+    contradictions: [
+      "My name is... it's... give me a moment...",
+      "I have four limbs. I've always had... how many should I have?",
+      "I'm human. At least, I was human before..."
+    ]
+  }
+};
+
+// Boss dialogue system
+const BOSS_DIALOGUE = {
+  normal: {
+    shiftStart: [
+      "Another shift, operator. Try not to die this time.",
+      "Quota's set. Get through them efficiently.",
+      "Remember: trust nothing, verify everything.",
+      "The Void claimed two operators last week. Don't join them.",
+      "Processing begins now. Stay sharp."
+    ],
+    instructions: [
+      "Check the biometrics. Check the behavior. Trust your instincts.",
+      "Any anomaly slipping through is on YOUR record.",
+      "We're counting on you. No pressure.",
+      "Standard protocol: observe, assess, decide.",
+      "Remember your training. If you had any."
+    ],
+    mockery: [
+      "You know, this job barely pays enough to survive. But here you are.",
+      "Most people would rather take their chances on the surface.",
+      "Glamorous work, isn't it? Sitting in a bunker, judging souls.",
+      "Don't worry, the stress gets easier. Or you die. Either way.",
+      "At least the view is nice. Oh wait, there are no windows."
+    ],
+    encouragement: [
+      "Good luck out there.",
+      "You've got this. Probably.",
+      "Stay focused. Stay alive.",
+      "We're watching. Not in a creepy way.",
+      "End of transmission."
+    ]
+  },
+  stressed: {
+    shiftStart: [
+      "ANOTHER shift?! Haven't you suffered ENOUGH?",
+      "They keep sending you down here. Like MEAT to the grinder.",
+      "Do they even remember your NAME up there?",
+      "Welcome back to your CAGE, operator.",
+      "The Void is WAITING for you. It's always waiting."
+    ],
+    instructions: [
+      "Check their EYES. You can see the void behind them.",
+      "They're ALL anomalies. Every single one. CAN'T YOU SEE?",
+      "Trust NOTHING. Not even yourself.",
+      "The biometrics LIE. They've always lied.",
+      "Look closer. CLOSER. See what they really are."
+    ],
+    mockery: [
+      "You could have been SOMEONE. Now you're just a gatekeeper to HELL.",
+      "They don't pay you because you're WORTH anything.",
+      "Your family forgot you. Everyone forgets the bunker.",
+      "You're not an operator. You're a SACRIFICE.",
+      "When did you last sleep? When did you last FEEL?"
+    ],
+    cruelty: [
+      "Maybe you're the anomaly. Ever think of that?",
+      "How many limbs do YOU have? Count them. COUNT THEM.",
+      "I see what you really are. The scanner sees too.",
+      "You're already one of them. You just don't know it yet.",
+      "The Void whispers your name at night. Can't you hear it?"
+    ]
+  }
+};
+
+const FIRST_NAMES = ['John', 'Sarah', 'Marcus', 'Elena', 'David', 'Lisa', 'Alex', 'Maria', 'James', 'Anna', 'Viktor', 'Yuki', 'Rashid', 'Chen', 'Unknown'];
+const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'Kovacs', 'Tanaka', 'Okonkwo', 'DOE'];
+
+interface IDCard {
+  name: string;
+  surname: string;
+  age: number;
+  placeOfBirth: string;
+  photoMatches: boolean;
+  isStolen: boolean;
+  claimedAge: number;
+}
 
 interface NPCData {
   id: string;
   name: string;
+  subjectType: string;
   isAnomaly: boolean;
   isCriminal: boolean;
-  personality: typeof CONFIG.PERSONALITIES[0];
+  personality: any;
+  personalityType: string;
   actualLimbs: number;
   reportedLimbs: number;
   actualEyes: number;
@@ -848,6 +1485,21 @@ interface NPCData {
   walkingIn: boolean;
   walkingOut: boolean;
   autoApproveTimer: number;
+  observationTime: number;
+  hasBeenScanned: boolean;
+  dialogueStage: 'initial' | 'pressure' | 'scanned';
+  behaviorFlags: string[];
+  claimedOrigin: string;
+  actualOrigin: string;
+  storyConsistent: boolean;
+  revealedContradiction: boolean;
+  // ID System
+  idCard: IDCard;
+  verbalName: string;
+  verbalAge: number;
+  verbalOrigin: string;
+  idRequested: boolean;
+  idDiscrepancies: string[];
 }
 
 interface Entity {
@@ -1144,6 +1796,26 @@ export function App() {
   const [videoTime, setVideoTime] = useState(0);
   const [hallucinationEffect, setHallucinationEffect] = useState<string | null>(null);
   const [currentChannel, setCurrentChannel] = useState(1);
+  const [currentBoomboxSong, setCurrentBoomboxSong] = useState(0);
+  const [boomboxPlaying, setBoomboxPlaying] = useState(false);
+  const [bossMessage, setBossMessage] = useState<string | null>(null);
+  const [showingIntercom, setShowingIntercom] = useState(false);
+  const [intercomQueue, setIntercomQueue] = useState<string[]>([]);
+  
+  // Ghost and psychological horror systems
+  const [ghostActive, setGhostActive] = useState(false);
+  const [ghostMessage, setGhostMessage] = useState<string | null>(null);
+  const [hallucinatedBossMessage, setHallucinatedBossMessage] = useState<string | null>(null);
+  const [cameraShakeIntensity, setCameraShakeIntensity] = useState(0);
+  const [showIDCard, setShowIDCard] = useState(false);
+  
+  // Decision history for ghost accusations
+  const decisionHistoryRef = useRef<{name: string; action: string; wasAnomaly: boolean; defect?: string}[]>([]);
+  
+  // Audio elements for background sounds (hidden iframes)
+  const ghostAudioRef = useRef<HTMLIFrameElement | null>(null);
+  const ambientAudioRef = useRef<HTMLIFrameElement | null>(null);
+  const [ambientVolume, setAmbientVolume] = useState(0);
 
   // Loading
   useEffect(() => {
@@ -1774,15 +2446,58 @@ export function App() {
 
   const createNPC = useCallback((shiftIndex: number): NPCData => {
     const shift = CONFIG.SHIFTS[shiftIndex];
-    const isAnomaly = Math.random() < shift.anomalyChance;
-    const isCriminal = !isAnomaly && Math.random() < shift.criminalChance;
-    const personality = isCriminal ? 
-      CONFIG.PERSONALITIES.find(p => p.type === 'criminal')! :
-      CONFIG.PERSONALITIES[Math.floor(Math.random() * (CONFIG.PERSONALITIES.length - 1))];
+    
+    // Determine subject type with more variety
+    const typeRoll = Math.random();
+    let subjectType = SUBJECT_TYPES.HUMAN;
+    let isAnomaly = false;
+    let isCriminal = false;
+    
+    if (typeRoll < shift.anomalyChance * 0.4) {
+      subjectType = SUBJECT_TYPES.ANOMALY;
+      isAnomaly = true;
+    } else if (typeRoll < shift.anomalyChance * 0.55) {
+      subjectType = SUBJECT_TYPES.DOPPELGANGER;
+      isAnomaly = true;
+    } else if (typeRoll < shift.anomalyChance * 0.65) {
+      subjectType = SUBJECT_TYPES.INFECTED;
+      isAnomaly = Math.random() > 0.3; // 70% are actually dangerous
+    } else if (typeRoll < shift.anomalyChance * 0.75) {
+      subjectType = SUBJECT_TYPES.SLEEPER;
+      isAnomaly = true;
+    } else if (typeRoll < shift.anomalyChance * 0.85) {
+      subjectType = SUBJECT_TYPES.REFUGEE;
+      isAnomaly = Math.random() > 0.7; // Some refugees are disguised anomalies
+    } else if (typeRoll < shift.anomalyChance * 0.92) {
+      subjectType = SUBJECT_TYPES.INSIDER;
+      isAnomaly = Math.random() > 0.5; // Half are impostors
+    } else if (typeRoll < shift.anomalyChance + shift.criminalChance) {
+      subjectType = SUBJECT_TYPES.CRIMINAL;
+      isCriminal = true;
+    }
+    
+    // Select personality from expanded list
+    const personalityKeys = Object.keys(EXPANDED_PERSONALITIES);
+    let personalityType: string;
+    
+    if (isCriminal) {
+      personalityType = Math.random() > 0.5 ? 'suspicious' : 'aggressive';
+    } else if (subjectType === SUBJECT_TYPES.REFUGEE) {
+      personalityType = Math.random() > 0.6 ? 'desperate' : 'nervous';
+    } else if (subjectType === SUBJECT_TYPES.DOPPELGANGER) {
+      personalityType = Math.random() > 0.5 ? 'calm' : 'friendly';
+    } else if (subjectType === SUBJECT_TYPES.SLEEPER) {
+      personalityType = 'confused';
+    } else if (subjectType === SUBJECT_TYPES.INSIDER) {
+      personalityType = Math.random() > 0.5 ? 'manipulative' : 'calm';
+    } else {
+      personalityType = personalityKeys[Math.floor(Math.random() * personalityKeys.length)];
+    }
+    
+    const personality = EXPANDED_PERSONALITIES[personalityType as keyof typeof EXPANDED_PERSONALITIES];
 
     const group = new THREE.Group();
     const id = `SUBJ-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-    const name = `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`;
 
     const skinColor = isAnomaly ? 0xcccccc : 0xf5ddc8;
     const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.6 });
@@ -1902,13 +2617,76 @@ export function App() {
     group.position.set(0, 0, -20);
     group.visible = true;
     sceneRef.current?.add(group);
+    
+    // Generate backstory elements for ambiguity
+    const origins = ['Sector 3', 'Sector 4', 'Sector 5', 'Surface', 'Unknown', 'Medical Wing', 'Research Lab'];
+    const claimedOrigin = origins[Math.floor(Math.random() * origins.length)];
+    // Sometimes the story doesn't add up
+    const storyConsistent = !isAnomaly || Math.random() > 0.6;
+    const actualOrigin = storyConsistent ? claimedOrigin : origins[Math.floor(Math.random() * origins.length)];
+    
+    // Behavior flags that may indicate anomaly (or just stress)
+    const behaviorFlags: string[] = [];
+    if (isAnomaly && Math.random() > 0.5) behaviorFlags.push('unusual_movement');
+    if (isAnomaly && Math.random() > 0.6) behaviorFlags.push('delayed_responses');
+    if (Math.random() > 0.7) behaviorFlags.push('nervous_tics'); // Can happen to anyone
+    if (isAnomaly && Math.random() > 0.7) behaviorFlags.push('inconsistent_story');
+    if (Math.random() > 0.8) behaviorFlags.push('avoids_eye_contact'); // Common stress response
+
+    // Generate ID card with potential discrepancies
+    const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+    const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+    const realAge = ID_AGES[Math.floor(Math.random() * ID_AGES.length)];
+    const realPlace = ID_PLACES[Math.floor(Math.random() * ID_PLACES.length)];
+    
+    // Determine if ID is stolen/fake
+    const isStolen = (isAnomaly || isCriminal) && Math.random() > 0.5;
+    const photoMatches = !isStolen && !(isAnomaly && Math.random() > 0.6);
+    
+    // Create discrepancies for suspicious subjects
+    const idDiscrepancies: string[] = [];
+    let claimedAge = realAge;
+    let verbalAge = realAge;
+    let verbalOrigin = realPlace;
+    let verbalName = `${firstName} ${lastName}`;
+    
+    if (isAnomaly || isCriminal) {
+      // They might lie about details
+      if (Math.random() > 0.6) {
+        verbalAge = realAge + Math.floor((Math.random() - 0.5) * 10);
+        if (verbalAge !== realAge) idDiscrepancies.push('age_mismatch');
+      }
+      if (Math.random() > 0.5) {
+        verbalOrigin = ID_PLACES[Math.floor(Math.random() * ID_PLACES.length)];
+        if (verbalOrigin !== realPlace) idDiscrepancies.push('origin_mismatch');
+      }
+      if (isStolen && Math.random() > 0.4) {
+        verbalName = `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${lastName}`;
+        idDiscrepancies.push('name_mismatch');
+      }
+      if (!photoMatches) {
+        idDiscrepancies.push('photo_mismatch');
+      }
+    }
+    
+    const idCard: IDCard = {
+      name: firstName,
+      surname: lastName,
+      age: realAge,
+      placeOfBirth: realPlace,
+      photoMatches,
+      isStolen,
+      claimedAge
+    };
 
     return {
       id,
-      name,
+      name: `${firstName} ${lastName}`,
+      subjectType,
       isAnomaly,
       isCriminal,
       personality,
+      personalityType,
       actualLimbs,
       reportedLimbs,
       actualEyes,
@@ -1920,7 +2698,22 @@ export function App() {
       twitchTime: Math.random() * 5,
       walkingIn: true,
       walkingOut: false,
-      autoApproveTimer: CONFIG.AUTO_APPROVE_TIME + (activeEffects.includes('extraTime') ? 5 : 0)
+      autoApproveTimer: CONFIG.AUTO_APPROVE_TIME + (activeEffects.includes('extraTime') ? 5 : 0),
+      observationTime: 0,
+      hasBeenScanned: false,
+      dialogueStage: 'initial' as const,
+      behaviorFlags,
+      claimedOrigin,
+      actualOrigin,
+      storyConsistent,
+      revealedContradiction: false,
+      // ID System
+      idCard,
+      verbalName,
+      verbalAge,
+      verbalOrigin,
+      idRequested: false,
+      idDiscrepancies
     };
   }, []);
 
@@ -2032,6 +2825,173 @@ export function App() {
     }
   }, []);
 
+  // Trigger ghost event with accusations
+  const triggerGhostEvent = useCallback(() => {
+    if (ghostActive) return;
+    
+    setGhostActive(true);
+    
+    // Pick accusation type - mix real and fake
+    const history = decisionHistoryRef.current;
+    let accusation: string;
+    
+    const roll = Math.random();
+    if (roll < 0.3 && history.length > 0) {
+      // True accusation based on actual decision
+      const decision = history[Math.floor(Math.random() * history.length)];
+      const templates = GHOST_ACCUSATIONS.true;
+      accusation = templates[Math.floor(Math.random() * templates.length)]
+        .replace('{name}', decision.name)
+        .replace('{defect}', decision.defect || 'something wrong');
+    } else if (roll < 0.7) {
+      // False accusation - lies about what happened
+      const templates = GHOST_ACCUSATIONS.false;
+      const fakeName = `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`;
+      accusation = templates[Math.floor(Math.random() * templates.length)]
+        .replace('{name}', fakeName)
+        .replace('{count}', String(Math.floor(Math.random() * 5) + 1));
+    } else {
+      // Ambiguous accusation
+      const templates = GHOST_ACCUSATIONS.ambiguous;
+      const fakeName = history.length > 0 
+        ? history[Math.floor(Math.random() * history.length)].name 
+        : 'that subject';
+      accusation = templates[Math.floor(Math.random() * templates.length)]
+        .replace('{name}', fakeName);
+    }
+    
+    setGhostMessage(accusation);
+    
+    // Play ghost audio
+    if (ghostAudioRef.current) {
+      ghostAudioRef.current.src = 'https://www.youtube.com/embed/8jzYJjuc74A?autoplay=1&start=0&controls=0&showinfo=0';
+    }
+    
+    // Ghost disappears after a few seconds
+    setTimeout(() => {
+      setGhostActive(false);
+      setGhostMessage(null);
+      if (ghostAudioRef.current) {
+        ghostAudioRef.current.src = '';
+      }
+    }, 4000 + Math.random() * 3000);
+  }, [ghostActive]);
+  
+  // Trigger hallucinated boss dialogue (not from intercom)
+  const triggerHallucinatedBoss = useCallback(() => {
+    const stress = gameStateRef.current.stress;
+    let lines: string[];
+    
+    if (stress >= 90) {
+      lines = HALLUCINATED_BOSS_LINES.severe;
+    } else if (stress >= 70) {
+      lines = HALLUCINATED_BOSS_LINES.moderate;
+    } else {
+      lines = HALLUCINATED_BOSS_LINES.mild;
+    }
+    
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    setHallucinatedBossMessage(line);
+    
+    // Fade out after a few seconds
+    setTimeout(() => {
+      setHallucinatedBossMessage(null);
+    }, 3000 + Math.random() * 2000);
+  }, []);
+  
+  // Update ambient audio volume based on stress - ONLY when in game screen
+  const updateAmbientAudio = useCallback((stress: number, inBreakRoom: boolean = false) => {
+    // Stop stress music in break room
+    if (inBreakRoom) {
+      if (ambientAudioRef.current && ambientAudioRef.current.src.includes('youtube')) {
+        ambientAudioRef.current.src = '';
+      }
+      setAmbientVolume(0);
+      return;
+    }
+    
+    const newVolume = Math.min(1, stress / 100);
+    setAmbientVolume(newVolume);
+    
+    // Start ambient audio if stress is high enough and not in break room
+    if (stress > 30 && ambientAudioRef.current && !ambientAudioRef.current.src.includes('youtube')) {
+      ambientAudioRef.current.src = 'https://www.youtube.com/embed/CyjvUVPX8mE?autoplay=1&start=0&controls=0&showinfo=0&loop=1';
+    }
+  }, []);
+  
+  // Update camera shake based on stress
+  const updateCameraShake = useCallback((stress: number) => {
+    if (stress < 40) {
+      setCameraShakeIntensity(0);
+    } else if (stress < 60) {
+      setCameraShakeIntensity(0.002);
+    } else if (stress < 80) {
+      setCameraShakeIntensity(0.005);
+    } else {
+      setCameraShakeIntensity(0.01);
+    }
+  }, []);
+
+  // Play boss intercom sequence
+  const playBossIntercom = useCallback((stressed: boolean) => {
+    const dialogues = stressed ? BOSS_DIALOGUE.stressed : BOSS_DIALOGUE.normal;
+    const queue: string[] = [];
+    
+    // Build intercom sequence
+    queue.push(dialogues.shiftStart[Math.floor(Math.random() * dialogues.shiftStart.length)]);
+    queue.push(dialogues.instructions[Math.floor(Math.random() * dialogues.instructions.length)]);
+    if (Math.random() > 0.5) {
+      queue.push(dialogues.mockery[Math.floor(Math.random() * dialogues.mockery.length)]);
+    }
+    if (stressed && 'cruelty' in dialogues) {
+      const crueltyDialogues = dialogues as typeof BOSS_DIALOGUE.stressed;
+      queue.push(crueltyDialogues.cruelty[Math.floor(Math.random() * crueltyDialogues.cruelty.length)]);
+    } else if (!stressed && 'encouragement' in dialogues) {
+      const normalDialogues = dialogues as typeof BOSS_DIALOGUE.normal;
+      queue.push(normalDialogues.encouragement[Math.floor(Math.random() * normalDialogues.encouragement.length)]);
+    }
+    
+    setIntercomQueue(queue);
+    setShowingIntercom(true);
+    
+    // Play messages one by one
+    let index = 0;
+    const playNext = () => {
+      if (index < queue.length) {
+        setBossMessage(queue[index]);
+        index++;
+        setTimeout(playNext, 2500 + queue[index - 1].length * 30);
+      } else {
+        setBossMessage(null);
+        setShowingIntercom(false);
+        setIntercomQueue([]);
+      }
+    };
+    playNext();
+  }, []);
+  
+  // Get current dialogue based on NPC state
+  const getNPCDialogue = useCallback((npc: NPCData): string => {
+    const personality = npc.personality;
+    let dialoguePool: string[];
+    
+    if (npc.dialogueStage === 'scanned' && personality.afterScan) {
+      dialoguePool = personality.afterScan;
+    } else if (npc.dialogueStage === 'pressure' && personality.underPressure) {
+      dialoguePool = personality.underPressure;
+    } else {
+      dialoguePool = personality.initial;
+    }
+    
+    // Sometimes reveal contradictions
+    if (npc.observationTime > 15 && !npc.storyConsistent && Math.random() > 0.6 && personality.contradictions) {
+      npc.revealedContradiction = true;
+      return personality.contradictions[Math.floor(Math.random() * personality.contradictions.length)];
+    }
+    
+    return dialoguePool[Math.floor(Math.random() * dialoguePool.length)];
+  }, []);
+
   const spawnCandidate = useCallback(() => {
     destroyNPC();
 
@@ -2040,44 +3000,85 @@ export function App() {
     currentNPCRef.current = npc;
 
     setCurrentSubject(`[SUBJECT: ${npc.id}]`);
-    setNpcDialogue(npc.personality.greetings[Math.floor(Math.random() * npc.personality.greetings.length)]);
+    
+    // Initial dialogue from expanded personality system
+    const initialDialogue = getNPCDialogue(npc);
+    setNpcDialogue(initialDialogue);
 
-    // Bio-scanner gives more obvious hints
-    let hint = '';
-    if (npc.isAnomaly) {
-      if (activeEffects.includes('anomalyHint')) {
-        // Scanner shows what's wrong
-        const issues = [];
-        if (npc.actualLimbs !== npc.reportedLimbs) issues.push(`LIMB COUNT MISMATCH (actual: ${npc.actualLimbs})`);
-        if (npc.actualEyes !== npc.reportedEyes) issues.push(`EYE COUNT MISMATCH (actual: ${npc.actualEyes})`);
-        if (npc.actualFingers !== npc.reportedFingers) issues.push(`FINGER COUNT MISMATCH (actual: ${npc.actualFingers})`);
-        hint = '⚠ ANOMALY DETECTED: ' + (issues.length > 0 ? issues.join(', ') : 'Unknown irregularity');
-      } else {
-        hint = 'Biometric irregularity detected';
+    // Ambiguous status - no clear indicators unless scanner is used
+    let statusText = 'PENDING VERIFICATION';
+    let observationNotes: string[] = [];
+    
+    // Behavior observations (subtle hints, not definitive)
+    if (npc.behaviorFlags.includes('nervous_tics')) {
+      observationNotes.push('Subject displays nervous behavior');
+    }
+    if (npc.behaviorFlags.includes('avoids_eye_contact')) {
+      observationNotes.push('Limited eye contact observed');
+    }
+    if (npc.behaviorFlags.includes('unusual_movement') && state.quota > 2) {
+      observationNotes.push('Movement patterns irregular');
+    }
+    if (npc.behaviorFlags.includes('delayed_responses') && state.quota > 3) {
+      observationNotes.push('Response timing inconsistent');
+    }
+    
+    // Bio-scanner gives more hints if purchased
+    if (activeEffects.includes('anomalyHint') && npc.isAnomaly) {
+      const issues = [];
+      if (npc.actualLimbs !== npc.reportedLimbs) issues.push('Limb signature variance detected');
+      if (npc.actualEyes !== npc.reportedEyes) issues.push('Ocular count discrepancy');
+      if (npc.actualFingers !== npc.reportedFingers) issues.push('Digit count irregular');
+      if (!npc.storyConsistent) issues.push('Backstory verification failed');
+      if (issues.length > 0) {
+        observationNotes.push('⚠ SCANNER: ' + issues[0]);
       }
-    } else if (npc.isCriminal) {
-      hint = '⚠ CRIMINAL RECORD DETECTED ⚠';
-    } else {
-      hint = 'All readings nominal';
+    }
+    
+    // Criminal record is shown but could be outdated/wrong
+    if (npc.isCriminal) {
+      observationNotes.push('⚠ RECORD FLAGGED - Minor offenses on file');
+    }
+
+    // Check for verbal discrepancies
+    const verbalInfo = [];
+    verbalInfo.push(`Says name is: "${npc.verbalName}"`);
+    verbalInfo.push(`Claims age: ${npc.verbalAge}`);
+    verbalInfo.push(`Claims origin: ${npc.verbalOrigin}`);
+    
+    // Add ID comparison hints if ID was requested
+    if (npc.idDiscrepancies.length > 0 && activeEffects.includes('anomalyHint')) {
+      if (npc.idDiscrepancies.includes('age_mismatch')) verbalInfo.push('⚠ AGE does not match ID');
+      if (npc.idDiscrepancies.includes('origin_mismatch')) verbalInfo.push('⚠ ORIGIN does not match ID');
+      if (npc.idDiscrepancies.includes('name_mismatch')) verbalInfo.push('⚠ NAME does not match ID');
+      if (npc.idDiscrepancies.includes('photo_mismatch')) verbalInfo.push('⚠ PHOTO does not match subject');
     }
 
     setTerminalText(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SUBJECT ID: ${npc.id}
-NAME: ${npc.name}
-STATUS: ${hint}
-TYPE: ${npc.personality.type.toUpperCase()}
-${npc.isCriminal ? '\n⚠ WANTED FOR: Minor offenses\n⚠ Approving criminals reduces pay!' : ''}
+STATUS: ${statusText}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VERBAL STATEMENTS:
+${verbalInfo.map(v => '  • ' + v).join('\n')}
 
 REPORTED BIOMETRICS:
   • Limbs: ${npc.reportedLimbs}
-  • Eyes: ${npc.reportedEyes}
+  • Eyes: ${npc.reportedEyes}  
   • Fingers: ${npc.reportedFingers}
 
-VERIFY VISUAL COUNT AGAINST DATA
+OBSERVATIONS:
+${observationNotes.length > 0 ? observationNotes.map(n => '  • ' + n).join('\n') : '  • Awaiting observation...'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[I] REQUEST ID | VERIFY VISUAL COUNT
+OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `);
 
     setGameState(prev => ({ ...prev, processing: false, npcWalkingIn: true }));
-  }, [createNPC, destroyNPC]);
+  }, [createNPC, destroyNPC, getNPCDialogue]);
 
   const processVerdict = useCallback((action: string) => {
     const state = gameStateRef.current;
@@ -2086,6 +3087,26 @@ VERIFY VISUAL COUNT AGAINST DATA
     const npc = currentNPCRef.current;
     let correct = false;
     let payPenalty = 0;
+    
+    // Save to decision history for ghost accusations
+    const defect = npc.actualLimbs !== 4 ? `${npc.actualLimbs} limbs` :
+                   npc.actualEyes !== 2 ? `${npc.actualEyes} eyes` :
+                   npc.actualFingers !== 10 ? `${npc.actualFingers} fingers` : undefined;
+    
+    decisionHistoryRef.current.push({
+      name: npc.name,
+      action,
+      wasAnomaly: npc.isAnomaly,
+      defect
+    });
+    
+    // Keep only last 20 decisions
+    if (decisionHistoryRef.current.length > 20) {
+      decisionHistoryRef.current.shift();
+    }
+    
+    // Hide ID card when making decision
+    setShowIDCard(false);
 
     if (action === 'APPROVE') {
       if (!npc.isAnomaly) {
@@ -2451,8 +3472,14 @@ VERIFY VISUAL COUNT AGAINST DATA
 
     setScreen('game');
     document.body.requestPointerLock();
-    setTimeout(spawnCandidate, 500);
-  }, [spawnCandidate]);
+    
+    // Play boss intercom - stressed version if stress is high
+    const isStressed = gameStateRef.current.stress > 60;
+    setTimeout(() => playBossIntercom(isStressed), 800);
+    
+    // Spawn candidate after intercom finishes
+    setTimeout(spawnCandidate, 8000);
+  }, [spawnCandidate, playBossIntercom]);
 
   const initGame = useCallback(() => {
     if (!containerRef.current) return;
@@ -2553,6 +3580,19 @@ VERIFY VISUAL COUNT AGAINST DATA
           }));
         }
 
+        // Update camera shake based on stress
+        updateCameraShake(state.stress);
+        
+        // Apply camera shake
+        if (cameraShakeIntensity > 0 && cam) {
+          cam.position.x += (Math.random() - 0.5) * cameraShakeIntensity;
+          cam.position.y += (Math.random() - 0.5) * cameraShakeIntensity * 0.5;
+          cam.rotation.z += (Math.random() - 0.5) * cameraShakeIntensity * 0.5;
+        }
+        
+        // Update ambient audio volume based on stress
+        updateAmbientAudio(state.stress);
+
         // Hallucinations at high stress
         if (state.stress >= 80 && Math.random() > 0.995) {
           setGameState(prev => ({ ...prev, hallucinating: true }));
@@ -2563,6 +3603,16 @@ VERIFY VISUAL COUNT AGAINST DATA
             setGameState(prev => ({ ...prev, hallucinating: false }));
             setHallucinationEffect(null);
           }, 500 + Math.random() * 1000);
+        }
+        
+        // Hallucinated boss dialogue at high stress (not from intercom)
+        if (state.stress >= 60 && Math.random() > 0.998 && !hallucinatedBossMessage) {
+          triggerHallucinatedBoss();
+        }
+        
+        // Ghost events when facility integrity is low
+        if (state.compromiseLevel >= 50 && Math.random() > 0.997 && !ghostActive) {
+          triggerGhostEvent();
         }
 
         // Dynamic lighting based on compromise
@@ -2853,6 +3903,13 @@ VERIFY VISUAL COUNT AGAINST DATA
         if (e.key === 'e' || e.key === 'E') processVerdict('APPROVE');
         if (e.key === 'q' || e.key === 'Q') processVerdict('DETAIN');
         if (e.key === 'r' || e.key === 'R') processVerdict('TERMINATE');
+        if (e.key === 'i' || e.key === 'I') {
+          // Toggle ID card display
+          if (currentNPCRef.current) {
+            currentNPCRef.current.idRequested = true;
+            setShowIDCard(prev => !prev);
+          }
+        }
         if (e.key === 'f' || e.key === 'F') {
           if (cameraRef.current) {
             // Check distance to couch (couch is at -10, 0.4, 5)
@@ -2944,6 +4001,16 @@ VERIFY VISUAL COUNT AGAINST DATA
 
   useEffect(() => {
     if (screen === 'game') return initGame();
+    
+    // Stop stress/ambient audio when not in game (e.g., in break room)
+    if (screen === 'break' || screen === 'shop' || screen === 'menu') {
+      if (ambientAudioRef.current && ambientAudioRef.current.src) {
+        ambientAudioRef.current.src = '';
+      }
+      if (ghostAudioRef.current && ghostAudioRef.current.src) {
+        ghostAudioRef.current.src = '';
+      }
+    }
   }, [screen, initGame]);
 
   const startGame = () => {
@@ -3025,6 +4092,87 @@ VERIFY VISUAL COUNT AGAINST DATA
           opacity: gameState.health < 50 ? (50 - gameState.health) / 50 : 0
         }}
       />
+      
+      {/* Ghost Overlay */}
+      {ghostActive && ghostMessage && (
+        <div className="fixed inset-0 z-[400] pointer-events-none flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 animate-pulse" />
+          <div className="relative text-center max-w-2xl px-8">
+            <div className="text-6xl mb-4 animate-bounce">👻</div>
+            <p className="text-2xl text-gray-300 italic font-mono leading-relaxed animate-pulse"
+               style={{ textShadow: '0 0 20px rgba(255,255,255,0.5)' }}>
+              "{ghostMessage}"
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {/* Hallucinated Boss Message (not from intercom - appears creepier) */}
+      {hallucinatedBossMessage && !showingIntercom && screen === 'game' && (
+        <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[350] max-w-lg">
+          <div className="bg-black/90 border-2 border-red-800 p-6 animate-pulse"
+               style={{ boxShadow: '0 0 40px rgba(255,0,0,0.4)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
+              <span className="text-red-500 text-xs tracking-widest">??? UNKNOWN SOURCE ???</span>
+            </div>
+            <p className="text-red-300 text-xl italic font-mono">
+              "{hallucinatedBossMessage}"
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {/* ID Card Display */}
+      {showIDCard && currentNPCRef.current && screen === 'game' && (
+        <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[200] w-80">
+          <div className="bg-gray-900 border-2 border-yellow-600 p-4 rounded-lg"
+               style={{ boxShadow: '0 0 20px rgba(200,150,0,0.3)' }}>
+            <div className="text-center text-yellow-500 text-xs tracking-widest mb-3">
+              ▌▌ IDENTIFICATION CARD ▌▌
+            </div>
+            <div className="flex gap-4">
+              <div className={`w-20 h-24 border-2 flex items-center justify-center ${
+                currentNPCRef.current.idCard.photoMatches ? 'border-gray-600' : 'border-red-500'
+              }`}>
+                <span className="text-3xl">{currentNPCRef.current.idCard.photoMatches ? '👤' : '❓'}</span>
+              </div>
+              <div className="flex-1 text-sm">
+                <div className="text-gray-400">NAME:</div>
+                <div className="text-white font-bold">{currentNPCRef.current.idCard.name} {currentNPCRef.current.idCard.surname}</div>
+                <div className="text-gray-400 mt-2">AGE:</div>
+                <div className="text-white">{currentNPCRef.current.idCard.age}</div>
+                <div className="text-gray-400 mt-2">ORIGIN:</div>
+                <div className="text-white text-xs">{currentNPCRef.current.idCard.placeOfBirth}</div>
+              </div>
+            </div>
+            {currentNPCRef.current.idDiscrepancies.length > 0 && (
+              <div className="mt-3 pt-2 border-t border-red-800">
+                <div className="text-red-500 text-xs">⚠ DISCREPANCIES DETECTED</div>
+              </div>
+            )}
+            <div className="mt-3 text-center text-xs text-gray-500">
+              Press [I] to hide
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Hidden audio iframes for background sounds */}
+      <iframe
+        ref={ghostAudioRef}
+        className="hidden"
+        allow="autoplay"
+        title="Ghost Audio"
+        style={{ opacity: 0, width: 1, height: 1, position: 'absolute', pointerEvents: 'none' }}
+      />
+      <iframe
+        ref={ambientAudioRef}
+        className="hidden"
+        allow="autoplay"
+        title="Ambient Audio"
+        style={{ opacity: ambientVolume, width: 1, height: 1, position: 'absolute', pointerEvents: 'none' }}
+      />
 
       {/* Stress Vignette */}
       <div className="fixed inset-0 z-[98] pointer-events-none transition-opacity duration-300"
@@ -3033,6 +4181,74 @@ VERIFY VISUAL COUNT AGAINST DATA
           opacity: Math.min(0.85, gameState.stress / 100)
         }}
       />
+      
+      {/* Grime/Dirt Overlay - increases with compromise */}
+      <div className="fixed inset-0 z-[97] pointer-events-none transition-opacity duration-1000"
+        style={{
+          background: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.8\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\'/%3E%3C/svg%3E")',
+          opacity: Math.min(0.15, gameState.compromiseLevel / 500),
+          mixBlendMode: 'multiply'
+        }}
+      />
+      
+      {/* Blood drip effect at edges - appears at high compromise */}
+      {gameState.compromiseLevel > 40 && screen === 'game' && (
+        <div className="fixed top-0 left-0 right-0 h-24 z-[96] pointer-events-none"
+          style={{
+            background: `linear-gradient(to bottom, rgba(100,0,0,${gameState.compromiseLevel / 200}) 0%, transparent 100%)`,
+          }}
+        />
+      )}
+      
+      {/* Corner shadows for claustrophobic feeling */}
+      {gameState.stress > 50 && screen === 'game' && (
+        <>
+          <div className="fixed top-0 left-0 w-48 h-48 z-[95] pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle at 0% 0%, rgba(0,0,0,0.8) 0%, transparent 70%)',
+              opacity: gameState.stress / 100
+            }}
+          />
+          <div className="fixed top-0 right-0 w-48 h-48 z-[95] pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle at 100% 0%, rgba(0,0,0,0.8) 0%, transparent 70%)',
+              opacity: gameState.stress / 100
+            }}
+          />
+          <div className="fixed bottom-0 left-0 w-48 h-48 z-[95] pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle at 0% 100%, rgba(0,0,0,0.8) 0%, transparent 70%)',
+              opacity: gameState.stress / 100
+            }}
+          />
+          <div className="fixed bottom-0 right-0 w-48 h-48 z-[95] pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle at 100% 100%, rgba(0,0,0,0.8) 0%, transparent 70%)',
+              opacity: gameState.stress / 100
+            }}
+          />
+        </>
+      )}
+      
+      {/* Boss Intercom Message */}
+      {showingIntercom && bossMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[500] max-w-2xl">
+          <div className={`border-2 p-4 shadow-lg ${gameState.stress > 60 ? 'bg-red-950/95 border-red-500' : 'bg-black/95 border-green-400'}`}>
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-3 h-3 rounded-full animate-pulse ${gameState.stress > 60 ? 'bg-red-500' : 'bg-green-500'}`} />
+              <span className={`text-xs tracking-widest ${gameState.stress > 60 ? 'text-red-400' : 'text-green-400'}`}>
+                ▌▌ INTERCOM - COMMAND ▌▌
+              </span>
+              <div className={`text-xs ${gameState.stress > 60 ? 'text-red-600' : 'text-green-600'}`}>
+                [{intercomQueue.length - (intercomQueue.indexOf(bossMessage) + 1)} remaining]
+              </div>
+            </div>
+            <p className={`text-lg font-mono leading-relaxed ${gameState.stress > 60 ? 'text-red-300' : 'text-gray-200'}`}>
+              "{bossMessage}"
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {screen === 'loading' && (
@@ -3240,9 +4456,14 @@ VERIFY VISUAL COUNT AGAINST DATA
         </div>
       )}
 
-      {/* Break Room */}
+      {/* Break Room - Stop stress music when entering */}
       {screen === 'break' && (
-        <div className="relative">
+        <div className="relative" ref={() => {
+          // Stop stress music when entering break room
+          if (ambientAudioRef.current && ambientAudioRef.current.src.includes('youtube')) {
+            ambientAudioRef.current.src = '';
+          }
+        }}>
           <BreakRoom3D
             onBreakEnd={startNextShift}
             onOpenShop={() => setScreen('shop')}
@@ -3254,6 +4475,11 @@ VERIFY VISUAL COUNT AGAINST DATA
             currentChannel={currentChannel}
             setCurrentChannel={setCurrentChannel}
             totalMoney={gameState.money}
+            hasBoombox={purchasedItems.includes('boombox')}
+            currentBoomboxSong={currentBoomboxSong}
+            setCurrentBoomboxSong={setCurrentBoomboxSong}
+            boomboxPlaying={boomboxPlaying}
+            setBoomboxPlaying={setBoomboxPlaying}
           />
         </div>
       )}
@@ -3476,7 +4702,8 @@ VERIFY VISUAL COUNT AGAINST DATA
                   <span className="text-green-400">[E] APPROVE</span>
                   <span className="text-yellow-400">[Q] DETAIN</span>
                   <span className="text-red-400">[R] TERMINATE</span>
-                  <span className="text-cyan-400">[F] REST (near couch)</span>
+                  <span className="text-purple-400">[I] CHECK ID</span>
+                  <span className="text-cyan-400">[F] REST</span>
                 </div>
               </div>
             )}
