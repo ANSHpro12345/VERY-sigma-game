@@ -1268,6 +1268,681 @@ function BreakRoom3D({
   );
 }
 
+// Highway Escape Component (PC ending) - Driving sequence with mounted machine gun
+interface HighwayEscapeProps {
+  onComplete: () => void;
+  onDeath: () => void;
+  highwayState: {
+    playerX: number;
+    speed: number;
+    score: number;
+    health: number;
+    distance: number;
+    targetDistance: number;
+    anomalies: { x: number; z: number; pancaked: boolean; pancakeTime: number; lane: number }[];
+    gunCooldown: number;
+    gameTime: number;
+  };
+  setHighwayState: React.Dispatch<React.SetStateAction<{
+    playerX: number;
+    speed: number;
+    score: number;
+    health: number;
+    distance: number;
+    targetDistance: number;
+    anomalies: { x: number; z: number; pancaked: boolean; pancakeTime: number; lane: number }[];
+    gunCooldown: number;
+    gameTime: number;
+  }>>;
+  playSound: (type: string) => void;
+}
+
+function HighwayEscape({ onComplete, onDeath, highwayState, setHighwayState, playSound }: HighwayEscapeProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const vehicleRef = useRef<THREE.Group | null>(null);
+  const animationIdRef = useRef<number>(0);
+  const keysRef = useRef<Record<string, boolean>>({});
+  const clockRef = useRef<THREE.Clock | null>(null);
+  const anomalyMeshesRef = useRef<THREE.Group[]>([]);
+  const lastSpawnRef = useRef<number>(0);
+  const carBounceRef = useRef<number>(0);
+  const mouseAimRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showMuzzleFlash, setShowMuzzleFlash] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
+  const [aimX, setAimX] = useState(0);
+  
+  useEffect(() => {
+    console.log("HighwayEscape component mounted!");
+    // Reset highway state
+    setHighwayState({
+      playerX: 0,
+      speed: 0.8,
+      score: 0,
+      health: 100,
+      distance: 0,
+      targetDistance: 1500,
+      anomalies: [],
+      gunCooldown: 0,
+      gameTime: 0
+    });
+    
+    // Show intro for 3 seconds
+    const timer = setTimeout(() => {
+      console.log("Intro finished, starting game!");
+      setShowIntro(false);
+    }, 3000);
+    
+    return () => clearTimeout(timer);
+  }, []);
+  
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    // Setup scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0a);
+    scene.fog = new THREE.FogExp2(0x0a0a0a, 0.008);
+    sceneRef.current = scene;
+    
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+    camera.position.set(0, 8, 20);
+    camera.lookAt(0, 0, -50);
+    cameraRef.current = camera;
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    containerRef.current.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+    
+    clockRef.current = new THREE.Clock();
+    
+    // Create tunnel
+    const tunnelGeometry = new THREE.CylinderGeometry(30, 30, 400, 32, 1, true);
+    const tunnelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      side: THREE.BackSide,
+      roughness: 0.9
+    });
+    const tunnel = new THREE.Mesh(tunnelGeometry, tunnelMaterial);
+    tunnel.rotation.x = Math.PI / 2;
+    tunnel.position.z = -150;
+    scene.add(tunnel);
+    
+    // Road
+    const roadGeometry = new THREE.PlaneGeometry(20, 400);
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+    const road = new THREE.Mesh(roadGeometry, roadMaterial);
+    road.rotation.x = -Math.PI / 2;
+    road.position.z = -150;
+    scene.add(road);
+    
+    // Road lines
+    for (let z = 0; z > -400; z -= 20) {
+      const line = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffff00 })
+      );
+      line.rotation.x = -Math.PI / 2;
+      line.position.set(0, 0.02, z);
+      scene.add(line);
+    }
+    
+    // Tunnel lights
+    for (let z = 0; z > -400; z -= 25) {
+      const light = new THREE.PointLight(0xff6600, 15, 40);
+      light.position.set(0, 20, z);
+      scene.add(light);
+      
+      // Light fixture
+      const fixture = new THREE.Mesh(
+        new THREE.BoxGeometry(4, 0.5, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0xff8800 })
+      );
+      fixture.position.set(0, 25, z);
+      scene.add(fixture);
+    }
+    
+    // Vehicle (player)
+    const vehicle = new THREE.Group();
+    
+    // Car body
+    const carBody = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 1.5, 5),
+      new THREE.MeshStandardMaterial({ color: 0x004488, metalness: 0.8 })
+    );
+    carBody.position.y = 0.75;
+    vehicle.add(carBody);
+    
+    // Car top
+    const carTop = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 1, 2.5),
+      new THREE.MeshStandardMaterial({ color: 0x003366, metalness: 0.6 })
+    );
+    carTop.position.set(0, 1.75, -0.5);
+    vehicle.add(carTop);
+    
+    // Wheels
+    for (const [x, z] of [[-1.3, 1.5], [1.3, 1.5], [-1.3, -1.5], [1.3, -1.5]]) {
+      const wheel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.5, 0.3, 16),
+        new THREE.MeshStandardMaterial({ color: 0x111111 })
+      );
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.5, z);
+      vehicle.add(wheel);
+    }
+    
+    // Mounted machine gun
+    const gunMount = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.4, 0.8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.9 })
+    );
+    gunMount.position.set(0, 2.5, 0);
+    vehicle.add(gunMount);
+    
+    const gunBarrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15, 0.15, 2, 8),
+      new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.95 })
+    );
+    gunBarrel.rotation.x = Math.PI / 2;
+    gunBarrel.position.set(0, 2.8, -1.5);
+    vehicle.add(gunBarrel);
+    
+    // Headlights
+    const headlight1 = new THREE.SpotLight(0xffffcc, 50, 100, Math.PI / 6);
+    headlight1.position.set(-1, 1, -2.5);
+    headlight1.target.position.set(-1, 0, -50);
+    vehicle.add(headlight1);
+    vehicle.add(headlight1.target);
+    
+    const headlight2 = new THREE.SpotLight(0xffffcc, 50, 100, Math.PI / 6);
+    headlight2.position.set(1, 1, -2.5);
+    headlight2.target.position.set(1, 0, -50);
+    vehicle.add(headlight2);
+    vehicle.add(headlight2.target);
+    
+    vehicle.position.set(0, 0, 10);
+    scene.add(vehicle);
+    vehicleRef.current = vehicle;
+    
+    // Ambient light
+    const ambient = new THREE.AmbientLight(0xffffff, 0.15);
+    scene.add(ambient);
+    
+    // Animation loop
+    const animate = () => {
+      animationIdRef.current = requestAnimationFrame(animate);
+      const dt = clockRef.current?.getDelta() || 0;
+      
+      if (showIntro) {
+        rendererRef.current?.render(scene, camera);
+        return;
+      }
+      
+      // Update game state
+      setHighwayState(prev => {
+        const newState = { ...prev };
+        newState.gameTime += dt;
+        
+        // Movement
+        const moveSpeed = 15;
+        if (keysRef.current['KeyA'] || keysRef.current['ArrowLeft']) {
+          newState.playerX = Math.max(-8, prev.playerX - moveSpeed * dt);
+        }
+        if (keysRef.current['KeyD'] || keysRef.current['ArrowRight']) {
+          newState.playerX = Math.min(8, prev.playerX + moveSpeed * dt);
+        }
+        
+        // Speed increases over time
+        newState.speed = Math.min(2, 0.8 + newState.distance / 2000);
+        newState.distance += newState.speed * 60 * dt;
+        
+        // Gun cooldown
+        if (newState.gunCooldown > 0) {
+          newState.gunCooldown -= dt;
+        }
+        
+        // Update vehicle position with bounce animation
+        if (vehicleRef.current) {
+          vehicleRef.current.position.x = newState.playerX;
+          // Car bounce animation
+          carBounceRef.current += 10 * dt;
+          vehicleRef.current.position.y = Math.sin(carBounceRef.current * newState.speed) * 0.15;
+          vehicleRef.current.rotation.x = Math.sin(carBounceRef.current * newState.speed * 0.5) * 0.02;
+          // Slight tilt when turning
+          vehicleRef.current.rotation.z = (keysRef.current['KeyA'] || keysRef.current['ArrowLeft']) ? 0.12 :
+                                           (keysRef.current['KeyD'] || keysRef.current['ArrowRight']) ? -0.12 : 0;
+        }
+        
+        // Move camera to follow
+        if (cameraRef.current) {
+          cameraRef.current.position.x = newState.playerX * 0.3;
+        }
+        
+        // Spawn anomalies - multiple at once, spread across lanes
+        const now = Date.now();
+        // Spawn rate decreases as distance increases (more enemies)
+        const baseSpawnRate = Math.max(400, 1200 - newState.distance / 3);
+        if (now - lastSpawnRef.current > baseSpawnRate) {
+          lastSpawnRef.current = now;
+          
+          // Spawn 1-3 anomalies at a time based on progress
+          const spawnCount = Math.min(3, 1 + Math.floor(newState.distance / 400));
+          const usedLanes: number[] = [];
+          
+          for (let s = 0; s < spawnCount; s++) {
+            // Pick a lane that isn't already used this spawn
+            let lane: number;
+            do {
+              lane = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, 1, 2
+            } while (usedLanes.includes(lane) && usedLanes.length < 5);
+            usedLanes.push(lane);
+            
+            const spawnX = lane * 3.5; // Space lanes out
+            const spawnZ = -80 - Math.random() * 40; // Randomize Z distance too
+            
+            // Create anomaly mesh
+            const anomaly = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({
+              color: 0x220000,
+              emissive: 0x440000,
+              emissiveIntensity: 0.8
+            });
+            
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1, 2.5, 8), bodyMat);
+            body.position.y = 1.25;
+            anomaly.add(body);
+            
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), bodyMat);
+            head.position.y = 2.8;
+            anomaly.add(head);
+            
+            // Glowing eyes
+            const eye1 = new THREE.Mesh(
+              new THREE.SphereGeometry(0.15, 8, 8),
+              new THREE.MeshBasicMaterial({ color: 0xff0000 })
+            );
+            eye1.position.set(-0.2, 2.85, 0.4);
+            anomaly.add(eye1);
+            
+            const eye2 = new THREE.Mesh(
+              new THREE.SphereGeometry(0.15, 8, 8),
+              new THREE.MeshBasicMaterial({ color: 0xff0000 })
+            );
+            eye2.position.set(0.2, 2.85, 0.4);
+            anomaly.add(eye2);
+            
+            // Long arms
+            for (const side of [-1, 1]) {
+              const arm = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.1, 0.15, 2, 6),
+                bodyMat
+              );
+              arm.position.set(side * 1, 1.5, 0);
+              arm.rotation.z = side * 0.8;
+              anomaly.add(arm);
+            }
+            
+            anomaly.position.set(spawnX, 0, spawnZ);
+            sceneRef.current?.add(anomaly);
+            anomalyMeshesRef.current.push(anomaly);
+            
+            newState.anomalies = [...newState.anomalies, {
+              x: spawnX,
+              z: spawnZ,
+              pancaked: false,
+              pancakeTime: 0,
+              lane: lane
+            }];
+          }
+        }
+        
+        // Update anomalies
+        const updatedAnomalies: typeof newState.anomalies = [];
+        for (let i = 0; i < newState.anomalies.length; i++) {
+          const a = { ...newState.anomalies[i] };
+          const mesh = anomalyMeshesRef.current[i];
+          
+          if (!mesh) continue;
+          
+          // Move anomaly towards player
+          a.z += newState.speed * 60 * dt;
+          
+          // Side movement towards player
+          const dx = newState.playerX - a.x;
+          a.x += Math.sign(dx) * Math.min(Math.abs(dx), 3 * dt);
+          
+          mesh.position.set(a.x, a.pancaked ? 0.1 : 0, a.z);
+          
+          // Pancake/shot effect - make them flatten and disappear
+          if (a.pancaked) {
+            a.pancakeTime += dt;
+            // Flatten effect - squash vertically, expand horizontally
+            mesh.scale.y = Math.max(0.02, 1 - a.pancakeTime * 5);
+            mesh.scale.x = 1 + a.pancakeTime * 4;
+            mesh.scale.z = 1 + a.pancakeTime * 4;
+            mesh.position.y = Math.max(0.1, mesh.position.y - dt * 3);
+            
+            // Remove after fully flattened
+            if (a.pancakeTime > 0.8) {
+              sceneRef.current?.remove(mesh);
+              continue;
+            }
+          } else {
+            // Collision with vehicle - only pancake when anomaly is AT the car position
+            const vehX = newState.playerX;
+            const vehZ = 10; // Car is at Z=10
+            const distX = Math.abs(a.x - vehX);
+            const distZ = a.z - vehZ; // Positive when anomaly is past the car
+            
+            // Only pancake if:
+            // 1. Anomaly is within horizontal range of car (distX < 2)
+            // 2. Anomaly Z is between the front and back of car (distZ between -2 and 4)
+            if (distX < 2 && distZ > 2 && distZ < 6) {
+              // RUN OVER! PANCAKED!
+              a.pancaked = true;
+              a.pancakeTime = 0;
+              newState.score += 75; // Bonus for running over
+              playSound('terminate');
+              
+              // Blood splatter effect on the road
+              const splat = new THREE.Mesh(
+                new THREE.CircleGeometry(2.5, 16),
+                new THREE.MeshBasicMaterial({ color: 0x880000, transparent: true, opacity: 0.8 })
+              );
+              splat.rotation.x = -Math.PI / 2;
+              splat.position.set(a.x, 0.03, a.z);
+              sceneRef.current?.add(splat);
+            }
+          }
+          
+          // Remove if too far behind
+          if (a.z > 30) {
+            sceneRef.current?.remove(mesh);
+            continue;
+          }
+          
+          updatedAnomalies.push(a);
+        }
+        
+        // Clean up meshes array
+        anomalyMeshesRef.current = anomalyMeshesRef.current.slice(0, updatedAnomalies.length);
+        newState.anomalies = updatedAnomalies;
+        
+        // Check win condition
+        if (newState.distance >= newState.targetDistance) {
+          setTimeout(() => onComplete(), 500);
+        }
+        
+        // Check death condition
+        if (newState.health <= 0) {
+          setTimeout(() => onDeath(), 500);
+        }
+        
+        return newState;
+      });
+      
+      rendererRef.current?.render(scene, camera);
+    };
+    
+    animate();
+    
+    // Controls
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.code] = true;
+      
+      // Shooting with space
+      if (e.code === 'Space') {
+        shootGun();
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.code] = false;
+    };
+    
+    // Mouse movement for aiming
+    const handleMouseMove = (e: MouseEvent) => {
+      // Map mouse position to aim position (-8 to 8 range)
+      const screenWidth = window.innerWidth;
+      const normalizedX = (e.clientX / screenWidth) * 2 - 1; // -1 to 1
+      mouseAimRef.current.x = normalizedX * 10; // -10 to 10
+      setAimX(normalizedX * 8); // For UI crosshair
+    };
+    
+    // Click to shoot
+    const handleMouseDown = () => {
+      shootGun();
+    };
+    
+    // Shooting function
+    const shootGun = () => {
+      setHighwayState(prev => {
+        if (prev.gunCooldown > 0) return prev;
+        
+        setShowMuzzleFlash(true);
+        setTimeout(() => setShowMuzzleFlash(false), 50);
+        playSound('gunFire');
+        
+        // Gun aims at mouse position
+        const aimTargetX = mouseAimRef.current.x;
+        
+        // Check for hits - gun aims at mouse crosshair position
+        let hitCount = 0;
+        const newAnomalies = prev.anomalies.map(a => {
+          if (a.pancaked) return a;
+          
+          // Calculate distance from aim point to anomaly
+          const distToAim = Math.abs(a.x - aimTargetX);
+          
+          // Hit detection: anomaly must be in front (z < 10) and within aim cone
+          // Aim cone gets larger for distant targets
+          const aimRadius = 2 + Math.abs(a.z) * 0.05;
+          
+          if (a.z < 10 && a.z > -80 && distToAim < aimRadius) {
+            hitCount++;
+            playSound('approve');
+            // Mark as shot (not pancaked - different death animation)
+            return { ...a, pancaked: true, pancakeTime: 0 };
+          }
+          return a;
+        });
+        
+        return {
+          ...prev,
+          gunCooldown: 0.12, // Faster fire rate
+          anomalies: newAnomalies,
+          score: prev.score + hitCount * 100
+        };
+      });
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mousedown', handleMouseDown);
+    
+    return () => {
+      cancelAnimationFrame(animationIdRef.current);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mousedown', handleMouseDown);
+      if (containerRef.current && rendererRef.current) {
+        containerRef.current.removeChild(rendererRef.current.domElement);
+      }
+    };
+  }, [showIntro]);
+  
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black">
+      <div ref={containerRef} className="absolute inset-0" />
+      
+      {/* Intro */}
+      {showIntro && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
+          <div className="text-center">
+            <h1 className="text-5xl font-bold text-red-500 mb-4 animate-pulse">⚠ HIGHWAY ESCAPE ⚠</h1>
+            <p className="text-xl text-gray-300 mb-6">The tunnel is swarming with anomalies!</p>
+            <p className="text-lg text-yellow-400">A/D or ←→ to steer | SPACE to shoot</p>
+            <p className="text-lg text-green-400 mt-2">Run them over for bonus points!</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Muzzle Flash */}
+      {showMuzzleFlash && (
+        <div className="absolute inset-0 bg-yellow-400/20 pointer-events-none z-30" />
+      )}
+      
+      {/* HUD */}
+      <div className="absolute inset-0 pointer-events-none z-20">
+        {/* Top HUD */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 text-center">
+          <div className="text-3xl font-bold text-yellow-400 mb-2">
+            DISTANCE: {highwayState.distance.toFixed(0)}m / {highwayState.targetDistance}m
+          </div>
+          <div className="w-80 h-6 bg-gray-800 border-2 border-yellow-500 mx-auto overflow-hidden rounded">
+            <div 
+              className="h-full bg-gradient-to-r from-yellow-600 via-yellow-400 to-yellow-300"
+              style={{ 
+                width: `${Math.min(100, (highwayState.distance / highwayState.targetDistance) * 100)}%`,
+                transition: 'width 0.1s linear',
+                boxShadow: '0 0 10px rgba(255,200,0,0.5)'
+              }}
+            />
+          </div>
+          <div className="text-sm text-yellow-600 mt-1">
+            {Math.floor((highwayState.distance / highwayState.targetDistance) * 100)}% COMPLETE
+          </div>
+        </div>
+        
+        {/* Score */}
+        <div className="absolute top-4 right-8 text-right">
+          <div className="text-sm text-gray-400">KILLS</div>
+          <div className="text-4xl font-bold text-red-500">{highwayState.score}</div>
+        </div>
+        
+        {/* Health */}
+        <div className="absolute top-4 left-8">
+          <div className="text-sm text-gray-400">VEHICLE HEALTH</div>
+          <div className="w-40 h-4 bg-gray-800 border border-green-500">
+            <div 
+              className="h-full bg-green-400 transition-all"
+              style={{ width: `${highwayState.health}%` }}
+            />
+          </div>
+        </div>
+        
+        {/* Speed */}
+        <div className="absolute bottom-8 left-8">
+          <div className="text-sm text-gray-400">SPEED</div>
+          <div className="text-3xl font-bold text-cyan-400">
+            {(highwayState.speed * 100).toFixed(0)} KM/H
+          </div>
+        </div>
+        
+        {/* Gun status */}
+        <div className="absolute bottom-8 right-8 text-right">
+          <div className="text-sm text-gray-400">MACHINE GUN</div>
+          <div className={`text-2xl font-bold ${highwayState.gunCooldown > 0 ? 'text-gray-500' : 'text-green-400 animate-pulse'}`}>
+            {highwayState.gunCooldown > 0 ? 'RELOADING...' : 'READY [SPACE]'}
+          </div>
+          <div className="text-xs text-gray-500">∞ AMMO</div>
+        </div>
+        
+        {/* Crosshair - Follows mouse horizontally */}
+        <div 
+          className="absolute top-1/3 -translate-y-1/2 transition-all duration-75"
+          style={{ left: `calc(50% + ${aimX * 30}px)`, transform: 'translate(-50%, -50%)' }}
+        >
+          {/* Outer ring */}
+          <div className="w-16 h-16 border-4 border-red-500 rounded-full opacity-80" style={{ boxShadow: '0 0 20px rgba(255,0,0,0.5)' }}>
+            {/* Inner dot */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full" />
+          </div>
+          {/* Crosshair lines */}
+          <div className="absolute w-1 h-8 bg-red-500 left-1/2 -translate-x-1/2 -top-10" style={{ boxShadow: '0 0 10px rgba(255,0,0,0.5)' }} />
+          <div className="absolute w-1 h-8 bg-red-500 left-1/2 -translate-x-1/2 -bottom-10" style={{ boxShadow: '0 0 10px rgba(255,0,0,0.5)' }} />
+          <div className="absolute h-1 w-8 bg-red-500 top-1/2 -translate-y-1/2 -left-10" style={{ boxShadow: '0 0 10px rgba(255,0,0,0.5)' }} />
+          <div className="absolute h-1 w-8 bg-red-500 top-1/2 -translate-y-1/2 -right-10" style={{ boxShadow: '0 0 10px rgba(255,0,0,0.5)' }} />
+          {/* Aiming text */}
+          <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 text-red-400 text-sm font-bold whitespace-nowrap">
+            CLICK TO SHOOT
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Final Jumpscare Component (PC only)
+function FinalJumpscare({ onComplete }: { onComplete: () => void }) {
+  const [showImage, setShowImage] = useState(true);
+  const audioRef = useRef<HTMLIFrameElement>(null);
+  
+  useEffect(() => {
+    // Play jumpscare audio
+    // The audio will play for 5 seconds then fade to black
+    
+    const timer = setTimeout(() => {
+      setShowImage(false);
+      setTimeout(onComplete, 500);
+    }, 5000);
+    
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+  
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
+      {showImage && (
+        <>
+          {/* Jumpscare image */}
+          <img 
+            src="https://play-lh.googleusercontent.com/qBiLTYKuDA9aecK01rKoBYMp19lLOSq3xJvLkjTxlLCOJ_blR9ZPvBUblRaKFbDQ8P29=w600-h300-pc0xffffff-pd"
+            alt=""
+            className="w-full h-full object-cover animate-pulse"
+            style={{ 
+              filter: 'contrast(200%) brightness(150%) saturate(50%)',
+              animation: 'shake 0.1s infinite'
+            }}
+          />
+          
+          {/* Audio (hidden iframe) */}
+          <iframe
+            ref={audioRef}
+            src="https://www.youtube.com/embed/T4EAjfDcYtA?autoplay=1&start=0&controls=0&showinfo=0"
+            allow="autoplay"
+            className="hidden"
+            title="Jumpscare Audio"
+          />
+          
+          {/* Shake animation */}
+          <style>{`
+            @keyframes shake {
+              0% { transform: translate(0, 0) rotate(0deg); }
+              25% { transform: translate(-5px, 5px) rotate(-1deg); }
+              50% { transform: translate(5px, -5px) rotate(1deg); }
+              75% { transform: translate(-5px, -5px) rotate(-1deg); }
+              100% { transform: translate(5px, 5px) rotate(1deg); }
+            }
+          `}</style>
+        </>
+      )}
+      
+      {/* Fade to black */}
+      {!showImage && (
+        <div className="absolute inset-0 bg-black flex items-center justify-center">
+          <p className="text-gray-800 text-sm">Connection terminated.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Game Configuration
 const CONFIG = {
   SENSITIVITY: 0.002,
@@ -1292,10 +1967,7 @@ const CONFIG = {
     { quota: 7, stressRate: 2.2, anomalyChance: 0.60, criminalChance: 0.22, basePay: 150, name: "VOID_WHISPERS" },
     { quota: 8, stressRate: 2.5, anomalyChance: 0.65, criminalChance: 0.25, basePay: 180, name: "SHADOW_PROTOCOL" },
     { quota: 9, stressRate: 2.8, anomalyChance: 0.70, criminalChance: 0.25, basePay: 220, name: "REALITY_FRACTURE" },
-    { quota: 10, stressRate: 3.2, anomalyChance: 0.75, criminalChance: 0.28, basePay: 280, name: "VOID_EMERGENCE" },
-    { quota: 12, stressRate: 3.8, anomalyChance: 0.80, criminalChance: 0.30, basePay: 350, name: "CRITICAL_MASS" },
-    { quota: 14, stressRate: 4.5, anomalyChance: 0.85, criminalChance: 0.32, basePay: 450, name: "APOCALYPSE_WATCH" },
-    { quota: 15, stressRate: 5.0, anomalyChance: 0.90, criminalChance: 0.35, basePay: 600, name: "FINAL_PROTOCOL" }
+    { quota: 10, stressRate: 3.5, anomalyChance: 0.80, criminalChance: 0.30, basePay: 350, name: "FINAL_PROTOCOL" }
   ],
   LORE: [
     { day: "001", text: "First batch of subjects arrived at Bunker S7. All biometric readings within normal parameters." },
@@ -2040,7 +2712,28 @@ export function App() {
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   
-  const [screen, setScreen] = useState<'loading' | 'deviceSelect' | 'mobileSelect' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits' | 'shop'>('loading');
+  const [screen, setScreen] = useState<'loading' | 'deviceSelect' | 'mobileSelect' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits' | 'shop' | 'highwayEscape' | 'pcWin' | 'finalJumpscare'>('loading');
+  
+  // Highway escape state (PC ending)
+  const [highwayState, setHighwayState] = useState({
+    playerX: 0,
+    speed: 0.5,
+    score: 0,
+    health: 100,
+    distance: 0,
+    targetDistance: 1500, // Distance to complete
+    anomalies: [] as { x: number; z: number; pancaked: boolean; pancakeTime: number; lane: number }[],
+    gunCooldown: 0,
+    gameTime: 0
+  });
+  
+  // Volume popup shown state (once per session)
+  const [volumePopupShown, setVolumePopupShown] = useState(false);
+const [showVolumePopup, setShowVolumePopup] = useState(false);
+const [showDevPopup, setShowDevPopup] = useState(false);
+const [devPinInput, setDevPinInput] = useState('');
+const [devModeActive, setDevModeActive] = useState(false);
+const [devPinError, setDevPinError] = useState(false);
   const [activeEffects, setActiveEffects] = useState<string[]>([]);
   const [purchasedItems, setPurchasedItems] = useState<string[]>([]);
   const [loadProgress, setLoadProgress] = useState(0);
@@ -3675,13 +4368,24 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     }));
 
     if (nextShift >= CONFIG.SHIFTS.length) {
-      setTransitionData({
-        title: "CONTAINMENT ACHIEVED",
-        message: "All shifts completed. Bunker S7 secured... for now.",
-        stats: `Total Earnings: $${(state.money + Math.max(0, totalPay)).toLocaleString()}`,
-        isWin: true
-      });
-      setScreen('gameover');
+      console.log("GAME COMPLETE! Device type:", deviceType);
+      // PC players get the highway escape ending, mobile players get direct win
+      // Also check if deviceType is null (shouldn't happen but fallback to PC)
+      if (deviceType === 'computer' || deviceType === null) {
+        console.log("Starting HIGHWAY ESCAPE for PC!");
+        // Start highway escape sequence for PC
+        setScreen('highwayEscape');
+      } else {
+        console.log("Direct win for mobile!");
+        // Mobile players win directly
+        setTransitionData({
+          title: "CONTAINMENT ACHIEVED",
+          message: "All shifts completed. Bunker S7 secured... for now.\n\nYou escaped through the emergency tunnels and made it to the surface!",
+          stats: `Total Earnings: $${(state.money + Math.max(0, totalPay)).toLocaleString()}`,
+          isWin: true
+        });
+        setScreen('gameover');
+      }
       return;
     }
 
@@ -3693,7 +4397,7 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
       isWin: false
     });
     setScreen('break');
-  }, []);
+  }, [deviceType]);
 
   const startNextShift = useCallback(() => {
     // IMPORTANT: Reset all key states to prevent stuck movement
@@ -4320,7 +5024,16 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     
     // On mobile, set locked to true immediately (no pointer lock needed)
     const isMobileDevice = deviceType === 'phone' || deviceType === 'tablet';
-    setGameState(prev => ({ ...prev, active: true, locked: isMobileDevice }));
+    
+    // Check if dev mode is active - start at shift 6 (index 5)
+    const startShift = devModeActive ? 5 : 0;
+    
+    // Reset dev mode after using it (only affects ONE game)
+    if (devModeActive) {
+      setDevModeActive(false);
+    }
+    
+    setGameState(prev => ({ ...prev, active: true, locked: isMobileDevice, shiftIndex: startShift }));
     
     setTimeout(() => {
       // Only request pointer lock on desktop
@@ -4576,7 +5289,14 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
           
           <div className="flex flex-col md:flex-row gap-6">
             <button 
-              onClick={() => { setDeviceType('computer'); setScreen('menu'); }}
+              onClick={() => { 
+                setDeviceType('computer'); 
+                setScreen('menu'); 
+                // Show volume popup for PC users (once per session)
+                if (!volumePopupShown) {
+                  setShowVolumePopup(true);
+                }
+              }}
               className="border-2 border-cyan-400 bg-cyan-950/30 text-cyan-400 px-12 py-8 text-xl tracking-widest hover:bg-cyan-400 hover:text-black transition-all cursor-pointer flex flex-col items-center gap-4"
             >
               <span className="text-5xl">💻</span>
@@ -4638,6 +5358,31 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
           >
             ← Back to device selection
           </button>
+        </div>
+      )}
+
+      {/* Volume Popup for PC - appears once per session on menu */}
+      {screen === 'menu' && deviceType === 'computer' && showVolumePopup && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80">
+          <div className="bg-gray-900 border-2 border-cyan-400 p-8 max-w-md text-center rounded-lg shadow-2xl" style={{ boxShadow: '0 0 60px rgba(0,255,255,0.3)' }}>
+            <div className="text-5xl mb-4">🔊</div>
+            <h2 className="text-2xl font-bold text-cyan-400 mb-4">AUDIO RECOMMENDATION</h2>
+            <p className="text-gray-300 mb-6 leading-relaxed">
+              For the <span className="text-yellow-400 font-bold">FULL HORROR EXPERIENCE</span>, we recommend turning your volume up to at least <span className="text-green-400 font-bold">70%</span>.
+            </p>
+            <p className="text-gray-500 text-sm mb-6">
+              This game features atmospheric sounds, jumpscares, and audio cues that enhance the gameplay.
+            </p>
+            <button 
+              onClick={() => {
+                setShowVolumePopup(false);
+                setVolumePopupShown(true);
+              }}
+              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-8 py-3 text-lg tracking-wider transition-all cursor-pointer"
+            >
+              GOT IT
+            </button>
+          </div>
         </div>
       )}
 
@@ -4712,6 +5457,84 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
               <p>VERSION 1.0.8</p>
               <p className="mt-1">© 2043 VOID INDUSTRIES</p>
             </div>
+            
+            {/* Dev button - PC ONLY */}
+            {deviceType === 'computer' && (
+              <button 
+                onClick={() => setShowDevPopup(true)}
+                className="mt-6 text-xs text-gray-700 hover:text-gray-500 cursor-pointer opacity-50 hover:opacity-100 transition-all"
+              >
+                [DEV]
+              </button>
+            )}
+            
+            {/* Dev mode indicator */}
+            {devModeActive && (
+              <div className="mt-2 text-xs text-purple-400 animate-pulse">
+                ★ DEV MODE: Next game starts at Shift 6 ★
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Dev PIN Popup - PC ONLY */}
+      {showDevPopup && deviceType === 'computer' && (
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/90">
+          <div className="bg-gray-900 border-2 border-purple-500 p-8 rounded-lg max-w-md" style={{ boxShadow: '0 0 40px rgba(128,0,255,0.4)' }}>
+            <h2 className="text-2xl font-bold text-purple-400 mb-4 text-center">🔧 DEV ACCESS</h2>
+            <p className="text-gray-400 text-sm mb-6 text-center">Enter the developer PIN to skip to Shift 6</p>
+            
+            <input 
+              type="password"
+              maxLength={4}
+              value={devPinInput}
+              onChange={(e) => {
+                setDevPinInput(e.target.value);
+                setDevPinError(false);
+              }}
+              placeholder="Enter 4-digit PIN"
+              className="w-full bg-black border-2 border-purple-700 text-purple-400 text-center text-2xl tracking-[0.5em] py-3 mb-4 focus:outline-none focus:border-purple-400"
+              autoFocus
+            />
+            
+            {devPinError && (
+              <p className="text-red-500 text-sm text-center mb-4 animate-pulse">
+                ⚠ INCORRECT PIN ⚠
+              </p>
+            )}
+            
+            <div className="flex gap-4">
+              <button 
+                onClick={() => {
+                  if (devPinInput === '2012') {
+                    setDevModeActive(true);
+                    setShowDevPopup(false);
+                    setDevPinInput('');
+                    setDevPinError(false);
+                  } else {
+                    setDevPinError(true);
+                  }
+                }}
+                className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 transition-all cursor-pointer"
+              >
+                SUBMIT
+              </button>
+              <button 
+                onClick={() => {
+                  setShowDevPopup(false);
+                  setDevPinInput('');
+                  setDevPinError(false);
+                }}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 transition-all cursor-pointer"
+              >
+                CANCEL
+              </button>
+            </div>
+            
+            <p className="text-gray-600 text-xs text-center mt-6">
+              Dev mode only affects the next game session
+            </p>
           </div>
         </div>
       )}
@@ -5330,6 +6153,125 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
         </div>
       )}
 
+      {/* Highway Escape - PC ONLY ending */}
+      {screen === 'highwayEscape' && (
+        <HighwayEscape 
+          onComplete={() => setScreen('pcWin')}
+          onDeath={() => {
+            setTransitionData({
+              title: "CONSUMED BY THE SWARM",
+              message: "The anomalies overwhelmed your vehicle. Your remains scatter across the highway.",
+              stats: `Distance: ${highwayState.distance.toFixed(0)}m | Kills: ${highwayState.score}`,
+              isWin: false
+            });
+            setScreen('gameover');
+          }}
+          highwayState={highwayState}
+          setHighwayState={setHighwayState}
+          playSound={(type: string) => audioContextRef.current && playSound(audioContextRef.current, type)}
+        />
+      )}
+
+      {/* PC Win Screen - Horror game themed */}
+      {screen === 'pcWin' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-[1000] bg-black overflow-hidden">
+          {/* Animated background grid */}
+          <div className="absolute inset-0 opacity-10"
+            style={{
+              backgroundImage: 'linear-gradient(rgba(0,255,65,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,65,0.3) 1px, transparent 1px)',
+              backgroundSize: '40px 40px',
+            }}
+          />
+          
+          {/* Glowing center effect */}
+          <div className="absolute w-[600px] h-[600px] rounded-full opacity-30"
+            style={{
+              background: 'radial-gradient(circle, rgba(0,255,65,0.4) 0%, transparent 70%)',
+              filter: 'blur(60px)',
+            }}
+          />
+          
+          {/* Top decorative border */}
+          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-transparent via-green-400 to-transparent opacity-50" />
+          <div className="absolute bottom-0 left-0 right-0 h-2 bg-gradient-to-r from-transparent via-green-400 to-transparent opacity-50" />
+          
+          {/* Main content */}
+          <div className="relative z-10 text-center">
+            {/* Victory emblem */}
+            <div className="text-8xl mb-4">🏆</div>
+            
+            <h1 className="text-5xl font-bold tracking-[0.15em] text-green-400 mb-2" style={{ textShadow: '0 0 60px #00ff41, 0 0 100px #00ff41' }}>
+              CONTAINMENT ACHIEVED
+            </h1>
+            <p className="text-xl text-green-600 tracking-widest mb-8">BUNKER S7 - SECURED</p>
+            
+            {/* Stats box */}
+            <div className="border-2 border-green-500 bg-black/80 p-6 mb-8 max-w-lg mx-auto" style={{ boxShadow: '0 0 30px rgba(0,255,0,0.2)' }}>
+              <div className="grid grid-cols-2 gap-4 text-left mb-4">
+                <div>
+                  <div className="text-xs text-gray-500 tracking-wider">SHIFTS SURVIVED</div>
+                  <div className="text-2xl text-green-400 font-bold">{CONFIG.SHIFTS.length}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 tracking-wider">TOTAL EARNINGS</div>
+                  <div className="text-2xl text-yellow-400 font-bold">${gameState.money.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 tracking-wider">DISTANCE ESCAPED</div>
+                  <div className="text-2xl text-cyan-400 font-bold">{highwayState.distance.toFixed(0)}m</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 tracking-wider">ANOMALIES ELIMINATED</div>
+                  <div className="text-2xl text-red-400 font-bold">{highwayState.score}</div>
+                </div>
+              </div>
+              <div className="border-t border-green-800 pt-4 text-center">
+                <div className="text-green-400 font-bold">STATUS: SURVIVOR</div>
+              </div>
+            </div>
+            
+            {/* Message from creator */}
+            <div className="border border-cyan-600 bg-cyan-950/30 p-6 rounded mb-8 max-w-md mx-auto" style={{ boxShadow: '0 0 20px rgba(0,255,255,0.2)' }}>
+              <div className="text-3xl mb-3">💌</div>
+              <p className="text-xl text-white font-bold mb-2">Hope you liked the game!</p>
+              <p className="text-cyan-400 text-lg font-mono">- from Prohibit</p>
+            </div>
+            
+            {/* The Prize Button - looks inviting but suspicious */}
+            <button 
+              onClick={() => setScreen('finalJumpscare')}
+              className="relative bg-gradient-to-r from-green-500 via-yellow-400 to-orange-500 text-black font-bold text-2xl px-12 py-5 rounded-lg hover:scale-105 transition-all cursor-pointer group"
+              style={{ boxShadow: '0 0 40px rgba(255,200,0,0.4), inset 0 0 20px rgba(255,255,255,0.2)' }}
+            >
+              <span className="relative z-10 flex items-center gap-3">
+                <span className="text-3xl">🎁</span>
+                <span>Claim Your Prize!</span>
+                <span className="text-3xl">🎁</span>
+              </span>
+              {/* Shimmer effect */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 group-hover:animate-shimmer" />
+            </button>
+            
+            <p className="text-gray-600 text-xs mt-6 animate-pulse tracking-wider">
+              You've earned it... click to receive your reward
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Final Jumpscare - PC ONLY */}
+      {screen === 'finalJumpscare' && (
+        <FinalJumpscare onComplete={() => {
+          // Fade to black and end
+          document.body.style.backgroundColor = '#000';
+          setTimeout(() => {
+            // Try to close the window or just stay on black screen
+            window.close();
+            // If window.close doesn't work (most browsers block it), just show black
+          }, 100);
+        }} />
+      )}
+
       <style>{`
         @keyframes scan { from { top: -100px; } to { top: 100%; } }
         .animate-scan { animation: scan 6s linear infinite; }
@@ -5340,6 +6282,13 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
         @keyframes pulse {
           0%, 100% { opacity: 0.2; transform: scale(1); }
           50% { opacity: 0.35; transform: scale(1.1); }
+        }
+        @keyframes shimmer {
+          0% { transform: translateX(-100%) skewX(-12deg); }
+          100% { transform: translateX(200%) skewX(-12deg); }
+        }
+        .group:hover .group-hover\\:animate-shimmer {
+          animation: shimmer 1.5s ease-in-out infinite;
         }
       `}</style>
     </div>
