@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 
+// Device type for responsive controls
+type DeviceType = 'computer' | 'phone' | 'tablet' | null;
+
+// Touch controls state interface
+interface TouchControlsState {
+  joystickActive: boolean;
+  joystickStart: { x: number; y: number };
+  joystickCurrent: { x: number; y: number };
+  moveVector: { x: number; y: number };
+  lastTouch: { x: number; y: number };
+  interactAvailable: string;
+  showShootButton: boolean;
+}
+
 // TV Channels for break room
 const TV_CHANNELS = [
   { id: 1, name: 'VOID NEWS', videoId: '1ZM6ztUlLWY' },
@@ -35,7 +49,8 @@ function BreakRoom3D({
   currentBoomboxSong,
   setCurrentBoomboxSong,
   boomboxPlaying,
-  setBoomboxPlaying
+  setBoomboxPlaying,
+  deviceType
 }: { 
   onBreakEnd: () => void
   onOpenShop: () => void
@@ -52,7 +67,11 @@ function BreakRoom3D({
   setCurrentBoomboxSong: (s: number) => void
   boomboxPlaying: boolean
   setBoomboxPlaying: (p: boolean) => void
+  deviceType: DeviceType
 }) {
+  // Determine if mobile based on deviceType prop
+  const isMobileDevice = deviceType === 'phone' || deviceType === 'tablet';
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -60,9 +79,8 @@ function BreakRoom3D({
   const clockRef = useRef<THREE.Clock | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const animationIdRef = useRef<number>(0);
-  // TV screen position is calculated dynamically in the animation loop
   const tvScreenMeshRef = useRef<THREE.Mesh | null>(null);
-  const lockedRef = useRef(false);
+  const lockedRef = useRef(true); // Always start locked for break room (mobile or desktop)
   const breakStartTimeRef = useRef<number>(Date.now());
   
   const [showSkipButton, setShowSkipButton] = useState(false);
@@ -76,15 +94,34 @@ function BreakRoom3D({
   const [tvPaused, setTvPaused] = useState(false);
   const remoteMeshRef = useRef<THREE.Mesh | null>(null);
   
+  // Mobile touch controls state
+  const [mobileTouch, setMobileTouch] = useState({
+    joystickActive: false,
+    joystickStart: { x: 0, y: 0 },
+    joystickCurrent: { x: 0, y: 0 },
+    moveVector: { x: 0, y: 0 },
+    lastTouch: { x: 0, y: 0 }
+  });
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  
   const currentVideoId = TV_CHANNELS[currentChannel - 1]?.videoId || TV_CHANNELS[0].videoId;
   const startSeconds = Math.floor(videoTime);
+  
+  // Debug log for mobile detection
+  useEffect(() => {
+    console.log('BreakRoom3D deviceType:', deviceType, 'isMobileDevice:', isMobileDevice);
+  }, [deviceType, isMobileDevice]);
 
   useEffect(() => {
     breakStartTimeRef.current = Date.now();
     // Reset keys when entering break room
     keysRef.current = {};
+    // On mobile, always set locked to true so movement works
+    if (isMobileDevice) {
+      lockedRef.current = true;
+    }
     // No timer - player can stay as long as they want
-  }, []);
+  }, [isMobileDevice]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -578,8 +615,10 @@ function BreakRoom3D({
       const cam = cameraRef.current;
       if (!cam) return;
 
-      // ALWAYS update camera movement when pointer is locked
-      if (lockedRef.current) {
+      // ALWAYS update camera movement - mobile is always "locked", desktop needs pointer lock
+      // On mobile, ALWAYS process movement. On desktop, only when pointer is locked.
+      const shouldProcessMovement = isMobileDevice || lockedRef.current;
+      if (shouldProcessMovement) {
         const speed = 0.06;
         const dir = new THREE.Vector3();
 
@@ -769,8 +808,8 @@ function BreakRoom3D({
     };
 
     const handleClick = () => {
-      // Request pointer lock on any click when not already locked
-      if (!document.pointerLockElement && rendererRef.current) {
+      // Only request pointer lock on DESKTOP, not on mobile
+      if (!isMobileDevice && !document.pointerLockElement && rendererRef.current) {
         rendererRef.current.domElement.requestPointerLock();
       }
     };
@@ -792,12 +831,17 @@ function BreakRoom3D({
     // Add click listener to the renderer element specifically
     renderer.domElement.addEventListener('click', handleClick);
 
-    // Request pointer lock after a short delay
-    setTimeout(() => {
-      if (renderer.domElement) {
-        renderer.domElement.requestPointerLock();
-      }
-    }, 500);
+    // Request pointer lock after a short delay - ONLY ON DESKTOP
+    if (!isMobileDevice) {
+      setTimeout(() => {
+        if (renderer.domElement) {
+          renderer.domElement.requestPointerLock();
+        }
+      }, 500);
+    } else {
+      // On mobile, set locked to true immediately
+      lockedRef.current = true;
+    }
 
     return () => {
       cancelAnimationFrame(animationIdRef.current);
@@ -976,31 +1020,248 @@ function BreakRoom3D({
           <div className="w-4 h-4 border-2 border-white/60 rounded-full" />
         </div>
 
-        {/* Break Room Title */}
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-black/85 border-2 border-green-400 px-8 py-4 text-green-400 font-mono rounded">
-          <div className="text-xs opacity-70 text-center mb-1 tracking-wider">BREAK ROOM</div>
-          <div className="text-xl font-bold text-center tracking-widest">TAKE YOUR TIME</div>
+        {/* Break Room Title - Adjusted for mobile to not overlap */}
+        <div className={`absolute left-1/2 -translate-x-1/2 bg-black/85 border-2 border-green-400 text-green-400 font-mono rounded ${
+          isMobileDevice ? 'top-2 px-4 py-2' : 'top-6 px-8 py-4'
+        }`}>
+          <div className={`opacity-70 text-center tracking-wider ${isMobileDevice ? 'text-[10px] mb-0' : 'text-xs mb-1'}`}>BREAK ROOM</div>
+          <div className={`font-bold text-center tracking-widest ${isMobileDevice ? 'text-sm' : 'text-xl'}`}>TAKE YOUR TIME</div>
         </div>
 
-        {/* Payment HUD */}
-        <div className="absolute top-6 right-6 bg-black/85 border-2 border-yellow-400 px-5 py-3 text-yellow-400 font-mono rounded">
-          <div className="text-xs opacity-70 tracking-wider">SHIFT {shiftNumber} EARNINGS</div>
-          <div className="text-2xl font-bold">${payment.toLocaleString()}</div>
-          <div className="text-xs text-green-400 mt-1">TOTAL: ${totalMoney.toLocaleString()}</div>
-          <div className="text-xs text-cyan-400 mt-1 animate-pulse">[B] OPEN SHOP</div>
+        {/* Payment HUD - Moved down on mobile to avoid overlap */}
+        <div className={`absolute bg-black/85 border-2 border-yellow-400 text-yellow-400 font-mono rounded ${
+          isMobileDevice ? 'top-16 right-2 px-3 py-2 text-xs' : 'top-6 right-6 px-5 py-3'
+        }`}>
+          <div className={`opacity-70 tracking-wider ${isMobileDevice ? 'text-[10px]' : 'text-xs'}`}>SHIFT {shiftNumber} EARNINGS</div>
+          <div className={`font-bold ${isMobileDevice ? 'text-lg' : 'text-2xl'}`}>${payment.toLocaleString()}</div>
+          <div className={`text-green-400 mt-1 ${isMobileDevice ? 'text-[10px]' : 'text-xs'}`}>TOTAL: ${totalMoney.toLocaleString()}</div>
+          {!isMobileDevice && <div className="text-xs text-cyan-400 mt-1 animate-pulse">[B] OPEN SHOP</div>}
         </div>
 
         {/* Controls hint */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/80 border border-gray-600 px-6 py-3 text-gray-400 font-mono text-sm text-center rounded">
-          <p>WASD - Move | Mouse - Look | B - Shop | Click to lock cursor</p>
-          <p className="text-xs opacity-60 mt-1">Walk to EXIT door + SPACE to start next shift | [T] Pause/Play TV | [E] Remote/Boombox</p>
+          {isMobileDevice ? (
+            <>
+              <p>Joystick - Move | Swipe - Look | Buttons - Interact</p>
+              <p className="text-xs opacity-60 mt-1">Use buttons to access TV, Boombox, Shop & Exit</p>
+            </>
+          ) : (
+            <>
+              <p>WASD - Move | Mouse - Look | B - Shop | Click to lock cursor</p>
+              <p className="text-xs opacity-60 mt-1">Walk to EXIT door + SPACE to start next shift | [T] Pause/Play TV | [E] Remote/Boombox</p>
+            </>
+          )}
         </div>
 
         {/* Continue to next shift indicator */}
-        {showSkipButton && (
+        {showSkipButton && !isMobileDevice && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-green-500 text-black px-8 py-4 font-mono font-bold text-xl animate-pulse rounded shadow-lg">
             PRESS [SPACE] TO START NEXT SHIFT
           </div>
+        )}
+
+        {/* Mobile Touch Controls - Joystick and Camera - ALWAYS RENDER ON MOBILE */}
+        {isMobileDevice && (
+          <>
+            {/* Joystick - Left side - ALWAYS VISIBLE ON MOBILE */}
+            <div 
+              className="absolute left-4 bottom-28 w-36 h-36 rounded-full border-4 border-white/50 bg-black/50 pointer-events-auto touch-none z-[300]"
+              style={{ touchAction: 'none' }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const touch = e.touches[0];
+                const rect = e.currentTarget.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                setMobileTouch(prev => ({
+                  ...prev,
+                  joystickActive: true,
+                  joystickStart: { x: centerX, y: centerY },
+                  joystickCurrent: { x: touch.clientX, y: touch.clientY }
+                }));
+              }}
+              onTouchMove={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!mobileTouch.joystickActive) return;
+                const touch = e.touches[0];
+                const dx = touch.clientX - mobileTouch.joystickStart.x;
+                const dy = touch.clientY - mobileTouch.joystickStart.y;
+                const maxDist = 55;
+                const dist = Math.min(maxDist, Math.sqrt(dx * dx + dy * dy));
+                const angle = Math.atan2(dy, dx);
+                const normX = (Math.cos(angle) * dist) / maxDist;
+                const normY = (Math.sin(angle) * dist) / maxDist;
+                setMobileTouch(prev => ({
+                  ...prev,
+                  joystickCurrent: { x: touch.clientX, y: touch.clientY },
+                  moveVector: { x: normX, y: normY }
+                }));
+                // Apply movement to keys
+                keysRef.current['KeyW'] = normY < -0.25;
+                keysRef.current['KeyS'] = normY > 0.25;
+                keysRef.current['KeyA'] = normX < -0.25;
+                keysRef.current['KeyD'] = normX > 0.25;
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMobileTouch(prev => ({
+                  ...prev,
+                  joystickActive: false,
+                  moveVector: { x: 0, y: 0 }
+                }));
+                keysRef.current = {};
+              }}
+            >
+              {/* Joystick base indicator */}
+              <div className="absolute inset-0 flex items-center justify-center text-white/30 text-xs">
+                MOVE
+              </div>
+              {/* Joystick knob */}
+              <div 
+                className="absolute w-14 h-14 rounded-full bg-white/70 border-3 border-white shadow-lg"
+                style={{
+                  left: `calc(50% + ${mobileTouch.moveVector.x * 45}px - 28px)`,
+                  top: `calc(50% + ${mobileTouch.moveVector.y * 45}px - 28px)`,
+                  transition: mobileTouch.joystickActive ? 'none' : 'all 0.15s ease-out'
+                }}
+              />
+            </div>
+
+            {/* Camera look area - Right half of screen */}
+            <div 
+              className="absolute right-0 top-0 w-1/2 h-full pointer-events-auto z-[200]"
+              style={{ touchAction: 'none' }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                const touch = e.touches[0];
+                touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+                setMobileTouch(prev => ({ ...prev, lastTouch: { x: touch.clientX, y: touch.clientY } }));
+              }}
+              onTouchMove={(e) => {
+                e.stopPropagation();
+                if (!touchStartRef.current) return;
+                const touch = e.touches[0];
+                const dx = touch.clientX - mobileTouch.lastTouch.x;
+                const dy = touch.clientY - mobileTouch.lastTouch.y;
+                
+                // Apply camera rotation directly
+                if (cameraRef.current) {
+                  cameraRef.current.rotation.y -= dx * 0.004;
+                  cameraRef.current.rotation.x = Math.max(
+                    -Math.PI / 2.5, 
+                    Math.min(Math.PI / 2.5, cameraRef.current.rotation.x - dy * 0.004)
+                  );
+                }
+                
+                setMobileTouch(prev => ({ ...prev, lastTouch: { x: touch.clientX, y: touch.clientY } }));
+              }}
+              onTouchEnd={() => {
+                touchStartRef.current = null;
+              }}
+            />
+
+            {/* Mobile action buttons - Right side - ALWAYS VISIBLE */}
+            <div className="absolute right-4 bottom-32 flex flex-col gap-3 pointer-events-auto z-[400]">
+              {/* Shop button - ALWAYS VISIBLE */}
+              <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Save video progress before opening shop
+                  const timeSpentSeconds = (Date.now() - breakStartTimeRef.current) / 1000;
+                  setVideoTime(videoTime + (timeSpentSeconds * 2));
+                  onOpenShop();
+                }}
+                className="w-16 h-16 rounded-full bg-yellow-500 border-4 border-yellow-300 flex items-center justify-center text-2xl active:scale-90 transition-transform shadow-lg"
+                style={{ touchAction: 'manipulation' }}
+              >
+                🛒
+              </button>
+
+              {/* TV Remote button - show if has remote */}
+              {hasRemote && (
+                <button 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowRemoteUI(prev => !prev);
+                    setShowBoomboxUI(false);
+                  }}
+                  className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-2xl active:scale-90 transition-transform shadow-lg ${
+                    nearRemote ? 'bg-green-500 border-green-300' : 'bg-green-700/50 border-green-500/50'
+                  }`}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  📺
+                </button>
+              )}
+
+              {/* TV Pause/Play button - ALWAYS show */}
+              <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTvPaused(prev => !prev);
+                }}
+                className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-2xl active:scale-90 transition-transform shadow-lg ${
+                  nearTV ? 'bg-blue-500 border-blue-300' : 'bg-blue-700/50 border-blue-500/50'
+                }`}
+                style={{ touchAction: 'manipulation' }}
+              >
+                {tvPaused ? '▶️' : '⏸️'}
+              </button>
+
+              {/* Boombox button - show if has boombox */}
+              {hasBoombox && (
+                <button 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowBoomboxUI(prev => !prev);
+                    setShowRemoteUI(false);
+                  }}
+                  className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-2xl active:scale-90 transition-transform shadow-lg ${
+                    nearBoombox ? 'bg-purple-500 border-purple-300' : 'bg-purple-700/50 border-purple-500/50'
+                  }`}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  📻
+                </button>
+              )}
+            </div>
+
+            {/* Next Shift button - ALWAYS visible on mobile at top of screen */}
+            {isMobileDevice && (
+              <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Save video progress before exiting
+                  const timeSpentSeconds = (Date.now() - breakStartTimeRef.current) / 1000;
+                  setVideoTime(videoTime + (timeSpentSeconds * 2));
+                  onBreakEnd();
+                }}
+                className={`absolute top-24 right-4 rounded-lg font-bold active:scale-95 transition-transform pointer-events-auto z-[500] ${
+                  showSkipButton 
+                    ? 'px-6 py-4 bg-green-500 border-4 border-green-300 text-base animate-pulse shadow-lg' 
+                    : 'px-4 py-3 bg-green-700/90 border-2 border-green-400 text-sm'
+                }`}
+                style={{ touchAction: 'manipulation' }}
+              >
+                🚪 {showSkipButton ? 'START SHIFT' : 'EXIT'}
+              </button>
+            )}
+            
+            {/* Desktop next shift prompt - only when near door */}
+            {showSkipButton && !isMobileDevice && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-green-500 text-black px-8 py-4 font-mono font-bold text-xl animate-pulse rounded shadow-lg">
+                PRESS [SPACE] TO START NEXT SHIFT
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -1779,11 +2040,25 @@ export function App() {
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   
-  const [screen, setScreen] = useState<'loading' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits' | 'shop'>('loading');
+  const [screen, setScreen] = useState<'loading' | 'deviceSelect' | 'mobileSelect' | 'menu' | 'game' | 'transition' | 'gameover' | 'break' | 'howtoplay' | 'credits' | 'shop'>('loading');
   const [activeEffects, setActiveEffects] = useState<string[]>([]);
   const [purchasedItems, setPurchasedItems] = useState<string[]>([]);
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadStatus, setLoadStatus] = useState('INITIALIZING...');
+  
+  // Device selection and touch controls
+  const [deviceType, setDeviceType] = useState<DeviceType>(null);
+  const [touchControls, setTouchControls] = useState<TouchControlsState>({
+    joystickActive: false,
+    joystickStart: { x: 0, y: 0 },
+    joystickCurrent: { x: 0, y: 0 },
+    moveVector: { x: 0, y: 0 },
+    lastTouch: { x: 0, y: 0 },
+    interactAvailable: '',
+    showShootButton: false
+  });
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isMobile = deviceType === 'phone' || deviceType === 'tablet';
   const [subtitle, setSubtitle] = useState<string | null>(null);
   const [hoverAction, setHoverAction] = useState<string | null>(null);
   const [showJumpscare, setShowJumpscare] = useState(false);
@@ -1835,7 +2110,8 @@ export function App() {
         i++;
       } else {
         clearInterval(interval);
-        setScreen('menu');
+        // Show device selection first
+        setScreen('deviceSelect');
       }
     }, 400);
     return () => clearInterval(interval);
@@ -2269,9 +2545,8 @@ export function App() {
   const createGun = useCallback(() => {
     if (!sceneRef.current) return;
 
+    // Use procedural model for gun
     const gun = new THREE.Group();
-    gunRef.current = gun;
-    gun.visible = false;
 
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.15, 0.4),
@@ -2302,6 +2577,9 @@ export function App() {
     coil.rotation.y = Math.PI / 2;
     coil.position.set(0, 0.02, -0.15);
     gun.add(coil);
+    
+    gunRef.current = gun;
+    gun.visible = false;
 
     gun.position.set(0.35, -0.25, -0.5);
     sceneRef.current.add(gun);
@@ -2309,7 +2587,11 @@ export function App() {
 
   const spawnEntity = useCallback((index: number) => {
     if (!sceneRef.current || !cameraRef.current) return;
+    
+    // Only spawn ONE entity in the hallway chase
+    if (index > 0) return;
 
+    // Use procedural model for entity
     const entity = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x440000, emissiveIntensity: 0.8 });
 
@@ -2339,23 +2621,20 @@ export function App() {
       entity.add(arm);
     }
 
-    // Add bright entity light for visibility in dark hallway
-    const entityLight = new THREE.PointLight(0xff0000, 8, 12);
+    // Add bright entity light for visibility in dark hallway (works with both models)
+    const entityLight = new THREE.PointLight(0xff0000, 10, 15);
     entityLight.position.set(0, 2, 0);
     entity.add(entityLight);
 
-    // Player runs towards NEGATIVE Z, so spawn entities at HIGHER Z (behind them)
-    // The hallway entrance is around Z=-22, exit is at Z=-22-HALLWAY_LENGTH
-    // Player starts at around Z=-27, so spawn entities at the hallway entrance area
+    // Player runs towards NEGATIVE Z, so spawn entity at HIGHER Z (behind them)
     const cam = cameraRef.current;
     const hallwayStartZ = -22; // Entrance of hallway
     
-    // Spawn at the START of hallway (behind the player who is running towards exit)
-    // Each subsequent entity spawns slightly further back
-    const spawnZ = hallwayStartZ + 2 + (index * 3); // Spawn near/at hallway entrance
+    // Spawn single entity at the START of hallway (behind the player)
+    const spawnZ = hallwayStartZ + 5;
     
     entity.position.set(
-      10 + (Math.random() - 0.5) * 2, // X position in hallway center
+      10, // X position in hallway center
       0,
       spawnZ
     );
@@ -2363,23 +2642,23 @@ export function App() {
     // Add to main scene for proper world coordinates
     sceneRef.current.add(entity);
 
-    // Flashlight effect slows entities
+    // Flashlight effect slows entity
     const speedMultiplier = activeEffects.includes('slowEntities') ? 0.7 : 1;
     
     entitiesRef.current.push({
       mesh: entity,
       stunned: false,
       stunnedUntil: 0,
-      speed: (CONFIG.ENTITY_SPEED + Math.random() * 0.02 + (index * 0.005)) * speedMultiplier, // Each entity slightly faster
+      speed: CONFIG.ENTITY_SPEED * speedMultiplier,
       active: true,
       spawnTime: Date.now() + 200 // Quick activation after spawn
     });
     
-    console.log(`Entity ${index} spawned at Z=${entity.position.z.toFixed(1)}, player at Z=${cam.position.z.toFixed(1)}`);
+    console.log(`Monster spawned at Z=${entity.position.z.toFixed(1)}, player at Z=${cam.position.z.toFixed(1)}`);
     
     // Alert player
-    setSubtitle(`⚠ ENTITY ${index + 1} HUNTING! ⚠`);
-    setTimeout(() => setSubtitle(null), 1500);
+    setSubtitle(`⚠ THE MONSTER IS HUNTING YOU! ⚠`);
+    setTimeout(() => setSubtitle(null), 2000);
   }, []);
 
   const createTerminal = useCallback(() => {
@@ -3421,6 +3700,11 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     keysRef.current = {};
     stressAccumulator.current = 0;
     
+    // Reset movement-related refs
+    if (cameraRef.current) {
+      cameraRef.current.rotation.set(0, 0, 0);
+    }
+    
     // Clear single-use shop items (keep permanent ones like remote)
     setPurchasedItems(prev => prev.filter(id => {
       const item = SHOP_ITEMS.find(i => i.id === id);
@@ -3471,7 +3755,15 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     }
 
     setScreen('game');
-    document.body.requestPointerLock();
+    
+    // Only request pointer lock on desktop
+    const isMobileDevice = deviceType === 'phone' || deviceType === 'tablet';
+    if (!isMobileDevice) {
+      document.body.requestPointerLock();
+    } else {
+      // On mobile, set locked to true immediately
+      setGameState(prev => ({ ...prev, locked: true }));
+    }
     
     // Play boss intercom - stressed version if stress is high
     const isStressed = gameStateRef.current.stress > 60;
@@ -3752,15 +4044,14 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
           return;
         }
 
-        // Spawn entities one at a time
-        if (now > lastEntitySpawnRef.current && entitySpawnIndexRef.current < 3 + state.shiftIndex) {
-          spawnEntity(entitySpawnIndexRef.current);
-          entitySpawnIndexRef.current++;
-          lastEntitySpawnRef.current = now + 5000; // 5 seconds between spawns
+        // Spawn single entity after head start
+        if (now > lastEntitySpawnRef.current && entitySpawnIndexRef.current === 0) {
+          spawnEntity(0); // Only spawn one entity
+          entitySpawnIndexRef.current = 1; // Mark as spawned
           if (!state.entitiesActive) {
             setGameState(prev => ({ ...prev, entitiesActive: true }));
-            setSubtitle("⚠ ENTITY DETECTED BEHIND YOU! ⚠");
-            setTimeout(() => setSubtitle(null), 2000);
+            setSubtitle("⚠ THE MONSTER IS BEHIND YOU! RUN! ⚠");
+            setTimeout(() => setSubtitle(null), 2500);
           }
         }
 
@@ -3928,6 +4219,8 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     };
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Skip mouse handling on mobile
+      if (deviceType === 'phone' || deviceType === 'tablet') return;
       if (!cameraRef.current || !gameStateRef.current.locked) return;
       const cam = cameraRef.current;
       cam.rotation.y -= e.movementX * CONFIG.SENSITIVITY;
@@ -3956,6 +4249,8 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
     };
 
     const handleClick = () => {
+      // Skip pointer lock on mobile
+      if (deviceType === 'phone' || deviceType === 'tablet') return;
       if (gameStateRef.current.active && !document.pointerLockElement) {
         document.body.requestPointerLock();
       }
@@ -4022,9 +4317,16 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
       audioContextRef.current.resume();
     }
     setScreen('game');
-    setGameState(prev => ({ ...prev, active: true, locked: false }));
+    
+    // On mobile, set locked to true immediately (no pointer lock needed)
+    const isMobileDevice = deviceType === 'phone' || deviceType === 'tablet';
+    setGameState(prev => ({ ...prev, active: true, locked: isMobileDevice }));
+    
     setTimeout(() => {
-      document.body.requestPointerLock();
+      // Only request pointer lock on desktop
+      if (!isMobileDevice) {
+        document.body.requestPointerLock();
+      }
       spawnCandidate();
     }, 500);
   };
@@ -4125,7 +4427,7 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
       
       {/* ID Card Display */}
       {showIDCard && currentNPCRef.current && screen === 'game' && (
-        <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[200] w-80">
+        <div className={`fixed z-[200] ${deviceType === 'phone' ? 'top-1/4 left-1/2 -translate-x-1/2 w-64' : deviceType === 'tablet' ? 'top-1/3 right-4 w-72' : 'top-1/2 right-8 -translate-y-1/2 w-80'}`}>
           <div className="bg-gray-900 border-2 border-yellow-600 p-4 rounded-lg"
                style={{ boxShadow: '0 0 20px rgba(200,150,0,0.3)' }}>
             <div className="text-center text-yellow-500 text-xs tracking-widest mb-3">
@@ -4264,6 +4566,81 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
         </div>
       )}
 
+      {/* Device Selection Screen */}
+      {screen === 'deviceSelect' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-[1000] bg-black">
+          <h1 className="text-4xl md:text-5xl font-bold tracking-[0.2em] text-green-400 mb-4" style={{ textShadow: '0 0 60px #00ff41' }}>
+            VOID GATE
+          </h1>
+          <p className="tracking-[0.15em] opacity-70 text-sm mb-12 text-center px-4">SELECT YOUR DEVICE</p>
+          
+          <div className="flex flex-col md:flex-row gap-6">
+            <button 
+              onClick={() => { setDeviceType('computer'); setScreen('menu'); }}
+              className="border-2 border-cyan-400 bg-cyan-950/30 text-cyan-400 px-12 py-8 text-xl tracking-widest hover:bg-cyan-400 hover:text-black transition-all cursor-pointer flex flex-col items-center gap-4"
+            >
+              <span className="text-5xl">💻</span>
+              <span>COMPUTER</span>
+              <span className="text-xs opacity-60">Keyboard & Mouse</span>
+            </button>
+            
+            <button 
+              onClick={() => setScreen('mobileSelect')}
+              className="border-2 border-purple-400 bg-purple-950/30 text-purple-400 px-12 py-8 text-xl tracking-widest hover:bg-purple-400 hover:text-black transition-all cursor-pointer flex flex-col items-center gap-4"
+            >
+              <span className="text-5xl">📱</span>
+              <span>MOBILE</span>
+              <span className="text-xs opacity-60">Touch Controls</span>
+            </button>
+          </div>
+          
+          <p className="mt-12 text-xs text-gray-600 text-center px-4">
+            Choose the device you're using for optimal controls
+          </p>
+        </div>
+      )}
+
+      {/* Mobile Device Selection Screen */}
+      {screen === 'mobileSelect' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-[1000] bg-black">
+          <h1 className="text-3xl font-bold tracking-[0.15em] text-purple-400 mb-4" style={{ textShadow: '0 0 40px #a855f7' }}>
+            MOBILE DEVICE
+          </h1>
+          <p className="tracking-[0.1em] opacity-70 text-sm mb-12 text-center px-4">SELECT YOUR SCREEN SIZE</p>
+          
+          <div className="flex flex-col gap-6">
+            <button 
+              onClick={() => { setDeviceType('phone'); setScreen('menu'); }}
+              className="border-2 border-pink-400 bg-pink-950/30 text-pink-400 px-16 py-6 text-lg tracking-widest hover:bg-pink-400 hover:text-black transition-all cursor-pointer flex items-center gap-6"
+            >
+              <span className="text-4xl">📱</span>
+              <div className="text-left">
+                <div>PHONE</div>
+                <div className="text-xs opacity-60">Smaller screen, larger buttons</div>
+              </div>
+            </button>
+            
+            <button 
+              onClick={() => { setDeviceType('tablet'); setScreen('menu'); }}
+              className="border-2 border-orange-400 bg-orange-950/30 text-orange-400 px-16 py-6 text-lg tracking-widest hover:bg-orange-400 hover:text-black transition-all cursor-pointer flex items-center gap-6"
+            >
+              <span className="text-4xl">📲</span>
+              <div className="text-left">
+                <div>TABLET</div>
+                <div className="text-xs opacity-60">Larger screen, more detail</div>
+              </div>
+            </button>
+          </div>
+          
+          <button 
+            onClick={() => setScreen('deviceSelect')}
+            className="mt-12 text-sm text-gray-500 hover:text-gray-300 cursor-pointer"
+          >
+            ← Back to device selection
+          </button>
+        </div>
+      )}
+
       {/* Menu */}
       {screen === 'menu' && (
         <div className="absolute inset-0 flex z-[1000] bg-black">
@@ -4349,15 +4726,27 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
           <div className="max-w-3xl grid grid-cols-2 gap-6 mb-8">
             <div className="border border-green-900 bg-green-950/20 p-5">
               <h3 className="text-green-400 font-bold mb-3 tracking-wider">🎮 CONTROLS</h3>
-              <ul className="text-sm text-gray-400 space-y-2">
-                <li><span className="text-white">WASD</span> - Move around</li>
-                <li><span className="text-white">Mouse</span> - Look around</li>
-                <li><span className="text-white">E</span> - Approve subject</li>
-                <li><span className="text-white">Q</span> - Detain subject</li>
-                <li><span className="text-white">R</span> - Terminate subject</li>
-                <li><span className="text-white">F</span> - Rest on couch</li>
-                <li><span className="text-white">Click</span> - Fire gun (escape mode)</li>
-              </ul>
+              {isMobile ? (
+                <ul className="text-sm text-gray-400 space-y-2">
+                  <li><span className="text-white">Left joystick</span> - Move around</li>
+                  <li><span className="text-white">Swipe right side</span> - Look around</li>
+                  <li><span className="text-white">✓ button</span> - Approve subject</li>
+                  <li><span className="text-white">⛓ button</span> - Detain subject</li>
+                  <li><span className="text-white">✕ button</span> - Terminate subject</li>
+                  <li><span className="text-white">🪪 button</span> - Check ID</li>
+                  <li><span className="text-white">⚡ button</span> - Fire gun (escape)</li>
+                </ul>
+              ) : (
+                <ul className="text-sm text-gray-400 space-y-2">
+                  <li><span className="text-white">WASD</span> - Move around</li>
+                  <li><span className="text-white">Mouse</span> - Look around</li>
+                  <li><span className="text-white">E</span> - Approve subject</li>
+                  <li><span className="text-white">Q</span> - Detain subject</li>
+                  <li><span className="text-white">R</span> - Terminate subject</li>
+                  <li><span className="text-white">F</span> - Rest on couch</li>
+                  <li><span className="text-white">Click</span> - Fire gun (escape mode)</li>
+                </ul>
+              )}
             </div>
             
             <div className="border border-red-900 bg-red-950/20 p-5">
@@ -4480,20 +4869,25 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
             setCurrentBoomboxSong={setCurrentBoomboxSong}
             boomboxPlaying={boomboxPlaying}
             setBoomboxPlaying={setBoomboxPlaying}
+            deviceType={deviceType}
           />
         </div>
       )}
 
-      {/* Shop Screen */}
+      {/* Shop Screen - Responsive for mobile */}
       {screen === 'shop' && (
-        <div className="absolute inset-0 flex flex-col items-center z-[1000] bg-black overflow-y-auto py-8">
-          <h1 className="text-4xl font-bold tracking-[0.2em] text-yellow-400 mb-2" style={{ textShadow: '0 0 40px #ffaa00' }}>
+        <div className="absolute inset-0 flex flex-col items-center z-[1000] bg-black overflow-y-auto py-4 md:py-8">
+          <h1 className={`font-bold tracking-[0.1em] md:tracking-[0.2em] text-yellow-400 mb-1 md:mb-2 ${
+            deviceType === 'phone' ? 'text-2xl' : 'text-4xl'
+          }`} style={{ textShadow: '0 0 40px #ffaa00' }}>
             🛒 VOID MART
           </h1>
-          <p className="text-gray-400 text-sm mb-2">Bunker S7 Supply Station</p>
-          <p className="text-2xl text-green-400 font-bold mb-6">Your Balance: ${gameState.money}</p>
+          <p className={`text-gray-400 mb-1 md:mb-2 ${deviceType === 'phone' ? 'text-xs' : 'text-sm'}`}>Bunker S7 Supply Station</p>
+          <p className={`text-green-400 font-bold mb-4 md:mb-6 ${deviceType === 'phone' ? 'text-lg' : 'text-2xl'}`}>Your Balance: ${gameState.money}</p>
           
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl px-4 mb-8">
+          <div className={`grid gap-2 md:gap-4 max-w-5xl px-2 md:px-4 mb-4 md:mb-8 ${
+            deviceType === 'phone' ? 'grid-cols-2' : deviceType === 'tablet' ? 'grid-cols-3' : 'grid-cols-2 lg:grid-cols-4'
+          }`}>
             {SHOP_ITEMS.map(item => {
               const owned = purchasedItems.includes(item.id);
               const canAfford = gameState.money >= item.price;
@@ -4502,24 +4896,26 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
               return (
                 <div 
                   key={item.id}
-                  className={`border-2 p-4 rounded transition-all ${
+                  className={`border-2 rounded transition-all ${
+                    deviceType === 'phone' ? 'p-2' : 'p-4'
+                  } ${
                     owned ? 'border-green-500 bg-green-950/30' :
                     canAfford ? 'border-yellow-500 bg-yellow-950/20 hover:bg-yellow-950/40' :
                     'border-gray-700 bg-gray-900/50 opacity-60'
                   }`}
                 >
-                  <div className="text-4xl mb-2">{item.icon}</div>
-                  <h3 className={`font-bold text-sm mb-1 ${owned ? 'text-green-400' : canAfford ? 'text-yellow-400' : 'text-gray-500'}`}>
+                  <div className={`mb-1 md:mb-2 ${deviceType === 'phone' ? 'text-2xl' : 'text-4xl'}`}>{item.icon}</div>
+                  <h3 className={`font-bold mb-1 ${deviceType === 'phone' ? 'text-xs' : 'text-sm'} ${owned ? 'text-green-400' : canAfford ? 'text-yellow-400' : 'text-gray-500'}`}>
                     {item.name}
                   </h3>
-                  <p className="text-xs text-gray-400 mb-3 h-12">{item.description}</p>
+                  <p className={`text-gray-400 mb-2 md:mb-3 ${deviceType === 'phone' ? 'text-[10px] h-8' : 'text-xs h-12'}`}>{item.description}</p>
                   <div className="flex justify-between items-center">
-                    <span className={`font-bold ${canAfford ? 'text-green-400' : 'text-red-400'}`}>
+                    <span className={`font-bold ${deviceType === 'phone' ? 'text-sm' : ''} ${canAfford ? 'text-green-400' : 'text-red-400'}`}>
                       ${item.price}
                     </span>
                     {owned ? (
-                      <span className="text-green-400 text-xs">
-                        {'permanent' in item && item.permanent ? '✓ PERMANENT' : (isActive ? '✓ ACTIVE' : '✓ OWNED')}
+                      <span className={`text-green-400 ${deviceType === 'phone' ? 'text-[10px]' : 'text-xs'}`}>
+                        {'permanent' in item && item.permanent ? '✓ PERM' : (isActive ? '✓' : '✓')}
                       </span>
                     ) : (
                       <button
@@ -4541,7 +4937,7 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
                           }
                         }}
                         disabled={!canAfford}
-                        className={`px-3 py-1 text-xs font-bold ${
+                        className={`font-bold ${deviceType === 'phone' ? 'px-2 py-1 text-[10px]' : 'px-3 py-1 text-xs'} ${
                           canAfford 
                             ? 'bg-yellow-500 text-black hover:bg-yellow-400 cursor-pointer' 
                             : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -4577,7 +4973,9 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
           
           <button 
             onClick={() => setScreen('break')}
-            className="border-2 border-yellow-400 text-yellow-400 px-10 py-3 tracking-widest hover:bg-yellow-400 hover:text-black transition-all cursor-pointer"
+            className={`border-2 border-yellow-400 text-yellow-400 tracking-widest hover:bg-yellow-400 hover:text-black transition-all cursor-pointer ${
+              deviceType === 'phone' ? 'px-6 py-2 text-sm' : 'px-10 py-3'
+            }`}
           >
             ← BACK TO BREAK ROOM
           </button>
@@ -4587,7 +4985,9 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
       {/* Game */}
       {screen === 'game' && (
         <>
-          <div ref={containerRef} className="absolute inset-0" onClick={() => !gameState.locked && document.body.requestPointerLock()} />
+          <div ref={containerRef} className="absolute inset-0" onClick={() => {
+            if (!isMobile && !gameState.locked) document.body.requestPointerLock();
+          }} />
 
           {/* HUD */}
           <div className="absolute inset-0 pointer-events-none z-[100]">
@@ -4631,7 +5031,7 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
 
             {/* Stats Panel */}
             {!gameState.escapeMode && (
-              <div className="absolute top-8 left-8 w-80 bg-black/95 border-2 border-green-400 p-5" style={{ boxShadow: '0 0 30px rgba(0,255,0,0.2)' }}>
+              <div className={`absolute top-4 left-4 bg-black/95 border-2 border-green-400 p-3 ${deviceType === 'phone' ? 'w-48 text-xs' : deviceType === 'tablet' ? 'w-64 text-sm' : 'w-80 p-5'}`} style={{ boxShadow: '0 0 30px rgba(0,255,0,0.2)' }}>
                 <div className="text-xs tracking-wider opacity-70 mb-1">NEURAL_INTEGRITY</div>
                 <div className="w-full h-3 bg-green-950 border border-green-800 mb-4">
                   <div className="h-full bg-green-400 transition-all duration-300" style={{ width: `${gameState.health}%`, boxShadow: '0 0 10px #00ff41' }} />
@@ -4677,9 +5077,9 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
               </div>
             )}
 
-            {/* Lore */}
-            {!gameState.escapeMode && (
-              <div className="absolute top-8 right-8 w-72 bg-black/95 border-2 border-red-700 p-4" style={{ boxShadow: '0 0 30px rgba(255,0,0,0.2)' }}>
+            {/* Lore - Hidden on phone, smaller on tablet */}
+            {!gameState.escapeMode && deviceType !== 'phone' && (
+              <div className={`absolute top-4 right-4 bg-black/95 border-2 border-red-700 p-3 ${deviceType === 'tablet' ? 'w-48 text-xs' : 'w-72 p-4'}`} style={{ boxShadow: '0 0 30px rgba(255,0,0,0.2)' }}>
                 <div className="text-xs tracking-wider text-red-500 mb-2">INCIDENT_LOG</div>
                 <div className="text-xs text-gray-400 leading-relaxed h-36 overflow-y-auto">
                   <div className="border-l-2 border-red-900 pl-2">
@@ -4692,18 +5092,29 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
 
             {/* Terminal */}
             {!gameState.escapeMode && (
-              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[850px] bg-black/95 border-2 border-green-400 p-5" style={{ boxShadow: '0 0 30px rgba(0,255,0,0.2)' }}>
+              <div className={`absolute bottom-10 left-1/2 -translate-x-1/2 bg-black/95 border-2 border-green-400 ${deviceType === 'phone' ? 'w-[90%] p-2 text-xs bottom-44' : deviceType === 'tablet' ? 'w-[80%] p-3 text-sm bottom-40' : 'w-[850px] p-5'}`} style={{ boxShadow: '0 0 30px rgba(0,255,0,0.2)' }}>
                 <div className="flex justify-between border-b border-green-800 pb-2 mb-3">
                   <span className="text-yellow-400 font-bold tracking-wider">{currentSubject}</span>
                   <span className="text-xs opacity-50">BIOMETRIC_SCAN: ACTIVE</span>
                 </div>
                 <div className="text-sm leading-relaxed whitespace-pre-line h-24 overflow-y-auto">{terminalText}</div>
                 <div className="mt-3 pt-2 border-t border-green-800 flex justify-around text-xs opacity-60">
-                  <span className="text-green-400">[E] APPROVE</span>
-                  <span className="text-yellow-400">[Q] DETAIN</span>
-                  <span className="text-red-400">[R] TERMINATE</span>
-                  <span className="text-purple-400">[I] CHECK ID</span>
-                  <span className="text-cyan-400">[F] REST</span>
+                  {isMobile ? (
+                    <>
+                      <span className="text-green-400">✓ APPROVE</span>
+                      <span className="text-yellow-400">⛓ DETAIN</span>
+                      <span className="text-red-400">✕ TERMINATE</span>
+                      <span className="text-purple-400">🪪 ID</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-green-400">[E] APPROVE</span>
+                      <span className="text-yellow-400">[Q] DETAIN</span>
+                      <span className="text-red-400">[R] TERMINATE</span>
+                      <span className="text-purple-400">[I] CHECK ID</span>
+                      <span className="text-cyan-400">[F] REST</span>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -4713,6 +5124,181 @@ OBSERVE BEHAVIOR | CHECK FOR DISCREPANCIES
               <div className={`absolute bottom-48 left-1/2 -translate-x-1/2 px-8 py-4 text-center border ${gameState.escapeMode ? 'bg-red-950/90 border-red-500 text-red-400' : 'bg-black/90 border-green-400'}`}>
                 {subtitle}
               </div>
+            )}
+
+            {/* Mobile Touch Controls */}
+            {isMobile && (
+              <>
+                {/* Joystick - Left side */}
+                <div 
+                  className="absolute left-8 bottom-32 w-32 h-32 rounded-full border-4 border-white/30 bg-black/30 pointer-events-auto touch-none"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    setTouchControls(prev => ({
+                      ...prev,
+                      joystickActive: true,
+                      joystickStart: { x: centerX, y: centerY },
+                      joystickCurrent: { x: touch.clientX, y: touch.clientY }
+                    }));
+                  }}
+                  onTouchMove={(e) => {
+                    e.preventDefault();
+                    if (!touchControls.joystickActive) return;
+                    const touch = e.touches[0];
+                    const dx = touch.clientX - touchControls.joystickStart.x;
+                    const dy = touch.clientY - touchControls.joystickStart.y;
+                    const maxDist = 50;
+                    const dist = Math.min(maxDist, Math.sqrt(dx * dx + dy * dy));
+                    const angle = Math.atan2(dy, dx);
+                    const normX = (Math.cos(angle) * dist) / maxDist;
+                    const normY = (Math.sin(angle) * dist) / maxDist;
+                    setTouchControls(prev => ({
+                      ...prev,
+                      joystickCurrent: { x: touch.clientX, y: touch.clientY },
+                      moveVector: { x: normX, y: normY }
+                    }));
+                    // Apply movement
+                    keysRef.current['KeyW'] = normY < -0.3;
+                    keysRef.current['KeyS'] = normY > 0.3;
+                    keysRef.current['KeyA'] = normX < -0.3;
+                    keysRef.current['KeyD'] = normX > 0.3;
+                  }}
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    setTouchControls(prev => ({
+                      ...prev,
+                      joystickActive: false,
+                      moveVector: { x: 0, y: 0 }
+                    }));
+                    keysRef.current = {};
+                  }}
+                >
+                  {/* Joystick knob */}
+                  <div 
+                    className="absolute w-12 h-12 rounded-full bg-white/60 border-2 border-white"
+                    style={{
+                      left: `calc(50% + ${touchControls.moveVector.x * 40}px - 24px)`,
+                      top: `calc(50% + ${touchControls.moveVector.y * 40}px - 24px)`,
+                      transition: touchControls.joystickActive ? 'none' : 'all 0.2s'
+                    }}
+                  />
+                </div>
+
+                {/* Camera look area - Right side */}
+                <div 
+                  className="absolute right-0 top-0 w-1/2 h-full pointer-events-auto touch-none"
+                  onTouchStart={(e) => {
+                    const touch = e.touches[0];
+                    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+                    setTouchControls(prev => ({ ...prev, lastTouch: { x: touch.clientX, y: touch.clientY } }));
+                  }}
+                  onTouchMove={(e) => {
+                    if (!touchStartRef.current) return;
+                    const touch = e.touches[0];
+                    const dx = touch.clientX - touchControls.lastTouch.x;
+                    const dy = touch.clientY - touchControls.lastTouch.y;
+                    
+                    // Apply camera rotation
+                    if (cameraRef.current) {
+                      cameraRef.current.rotation.y -= dx * 0.003;
+                      cameraRef.current.rotation.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, cameraRef.current.rotation.x - dy * 0.003));
+                    }
+                    
+                    setTouchControls(prev => ({ ...prev, lastTouch: { x: touch.clientX, y: touch.clientY } }));
+                  }}
+                  onTouchEnd={() => {
+                    touchStartRef.current = null;
+                  }}
+                />
+
+                {/* Action buttons - Right side */}
+                {!gameState.escapeMode && (
+                  <div className="absolute right-4 bottom-32 flex flex-col gap-3 pointer-events-auto">
+                    {/* Approve button */}
+                    <button 
+                      onClick={() => processVerdict('APPROVE')}
+                      className={`w-16 h-16 rounded-full bg-green-500/80 border-4 border-green-300 flex items-center justify-center text-2xl active:scale-90 transition-transform ${deviceType === 'phone' ? 'w-14 h-14' : ''}`}
+                    >
+                      ✓
+                    </button>
+                    
+                    {/* Detain button */}
+                    <button 
+                      onClick={() => processVerdict('DETAIN')}
+                      className={`w-16 h-16 rounded-full bg-yellow-500/80 border-4 border-yellow-300 flex items-center justify-center text-2xl active:scale-90 transition-transform ${deviceType === 'phone' ? 'w-14 h-14' : ''}`}
+                    >
+                      ⛓
+                    </button>
+                    
+                    {/* Terminate button */}
+                    <button 
+                      onClick={() => processVerdict('TERMINATE')}
+                      className={`w-16 h-16 rounded-full bg-red-500/80 border-4 border-red-300 flex items-center justify-center text-2xl active:scale-90 transition-transform ${deviceType === 'phone' ? 'w-14 h-14' : ''}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* ID Card button */}
+                {!gameState.escapeMode && currentNPCRef.current && (
+                  <button 
+                    onClick={() => {
+                      if (currentNPCRef.current) {
+                        currentNPCRef.current.idRequested = true;
+                        setShowIDCard(prev => !prev);
+                      }
+                    }}
+                    className="absolute right-4 top-1/3 w-14 h-14 rounded-full bg-purple-500/80 border-4 border-purple-300 flex items-center justify-center text-xl active:scale-90 transition-transform pointer-events-auto"
+                  >
+                    🪪
+                  </button>
+                )}
+
+                {/* Rest button - only show when near couch */}
+                {!gameState.escapeMode && hoverAction?.includes('REST') && (
+                  <button 
+                    onClick={restOnCouch}
+                    className="absolute left-1/2 -translate-x-1/2 bottom-8 px-8 py-4 bg-cyan-500/80 border-2 border-cyan-300 rounded-lg text-lg font-bold active:scale-95 transition-transform pointer-events-auto"
+                  >
+                    🛋️ REST
+                  </button>
+                )}
+
+                {/* Escape mode - Shoot button */}
+                {gameState.escapeMode && gameState.hasGun && (
+                  <button 
+                    onClick={fireGun}
+                    disabled={gameState.gunCooldown > 0}
+                    className={`absolute right-8 bottom-32 w-24 h-24 rounded-full border-4 flex items-center justify-center text-3xl active:scale-90 transition-all pointer-events-auto ${
+                      gameState.gunCooldown > 0 
+                        ? 'bg-gray-600/80 border-gray-400 opacity-50' 
+                        : 'bg-cyan-500/80 border-cyan-300 animate-pulse'
+                    }`}
+                  >
+                    ⚡
+                  </button>
+                )}
+
+                {/* Close door button in escape mode */}
+                {gameState.escapeMode && hoverAction?.includes('CLOSE') && (
+                  <button 
+                    onClick={closeDoorAndComplete}
+                    className="absolute left-1/2 -translate-x-1/2 bottom-8 px-12 py-6 bg-green-500/90 border-4 border-green-300 rounded-lg text-xl font-bold animate-pulse active:scale-95 transition-transform pointer-events-auto"
+                  >
+                    🚪 CLOSE DOOR
+                  </button>
+                )}
+
+                {/* Mobile controls hint */}
+                <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-white/50 text-center ${deviceType === 'phone' ? 'text-[10px]' : ''}`}>
+                  Left: Move | Right: Look | Buttons: Actions
+                </div>
+              </>
             )}
           </div>
         </>
